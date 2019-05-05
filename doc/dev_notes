@@ -1,0 +1,20 @@
+Training mode (continuous)
+
+ - Measurement windows of 1 minute. Standardized input format.
+ - Event detection
+ - Persistent storage of events
+ - Periodic clustering using DBSCAN (or other clustering method). Define update procedure (match with previous clusters, or update on existing clustering).
+
+Note: If we re-run the clustering procedure, then any "designated" devices will be lost. We need to find a way to re-match or update the existing set of clusters.
+
+Detection mode (continuous)
+
+ - Is triggered when recording time and/or data volume crititeria are met
+ - Starts from the training events
+ - Matches them based on detected clusters
+ - Implement triggers as needed
+
+Visualisations (continuous)
+
+ - Display power consumption
+ - Display active appliances (or all)
