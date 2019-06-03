@@ -1,3 +1,11 @@
+Notes on data formats:
+
+ - No need for the complexity of NILMTK. We can assume fixed-column format, but we can also make it compatible with nilmtk.
+ - Assume (power, active), (power, reactive), voltage, current, power_factor, ...?
+
+
+
+
 Training mode (continuous)
 
  - Measurement windows of 1 minute. Standardized input format.
@@ -18,3 +26,6 @@ Visualisations (continuous)
 
  - Display power consumption
  - Display active appliances (or all)
+
+
+
