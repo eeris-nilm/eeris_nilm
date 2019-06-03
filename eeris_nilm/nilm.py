@@ -9,11 +9,16 @@ from .hart85_eeris import Hart85
 
 
 class NILM(object):
+    # After how many updates should we store persistently?
+    # To do: Perhaps do this based on timestamp instead of counts?
     COUNT_THRESHOLD = 1
+    # Data window (in seconds) to store for each installation as a buffer
+    BUFFER_WINDOW = 300
 
     def __init__(self, mdb):
         self._mdb = mdb
         self._models = dict()
+        self._buffer = dict()
         self._data_count = dict()
         # Load variables
 
@@ -24,9 +29,21 @@ class NILM(object):
 
     def on_put(self, req, resp, inst_id):
         """ Handles PUT requests """
+        # Read the data
         if req.content_length:
             data = pd.read_json(req.stream)
         inst_iid = int(inst_id)
+
+        # Update data buffer
+        if (inst_iid not in self._buffer.keys()):
+            self._buffer[inst_iid] = data
+        else:
+            self._buffer[inst_iid].append(data)
+        start_ts = self._buffer[inst_iid].index[0] - \
+            pd.offsets.Second(self.BUFFER_WINDOW)
+        self._buffer[inst_iid] = self._buffer[inst_iid][self._buffer.index >= start_ts]
+
+        # Update steady states and transients
         if (inst_iid not in self._models.keys()):
             inst_doc = self._mdb.installations.find_one({"meterId": inst_iid})
             if inst_doc == None:
