@@ -18,7 +18,7 @@ class Hart85eeris():
         self.transients_list = transients_list
         self._data
 
-    def preprocess(self, data):
+    def preprocessing(self, data):
         """
         Data sanity checks and fixes before processing.
         """
@@ -31,7 +31,7 @@ class Hart85eeris():
                                 freq='S')
         self._data = data.reindex(index=idx, copy=True)
 
-    def _normalise(self):
+    def _normalisation(self):
         """
         Normalise power with voltage measurements
         """
@@ -43,14 +43,39 @@ class Hart85eeris():
                                    self._data['voltage']) ** 2)
         self._data.dropna()
 
-    def _edge_detection_online(self, data, n_seconds=0, models=None):
+    def _edge_detection_online(self, n_seconds=0, models=None):
         """
         Identify if there are edges in the last n_seconds of data. If yes, then
         match them against a set of existing models to guess whether a device
         was activated or not.
         """
+        pass
+
+    def _edge_detection(self):
+        """
+        The regular edge detection step of the hart method. Identify steady
+        states and transitions based on active and reactive power.
+        """
+        pass
+
+    def _clustering(self):
+        """
+        Clustering step of the hart method.
+        """
+        pass
+
+    def _matching(self):
+        """
+        On/Off matching of the hart method
+        """
+        pass
+
+    def _guess_type(self):
+        """
+        Guess the appliance type using an unnamed hart model
+        """
+        pass
         
-    
     # # Code for this is adapted from nilmtk
     # def _edge_detection(self, data):
     #     """
@@ -65,6 +90,6 @@ class Hart85eeris():
     #     print(self.steady_states_list)
     #     print(self.transients_list)
 
-    def test_hart(self, data):
+    def detect_online(self, data):
         ndata = self._normalisation(data)
         self._edge_detection(ndata)
