@@ -1,62 +1,138 @@
 import numpy as np
 import pandas as pd
-import datetime
-# from nilmtk.feature_detectors.steady_states import find_steady_states
 
 
 class Hart85eeris():
-    """ to do """
+    """ Modified implementation of Hart's NILM algorithm. """
     NOMINAL_VOLTAGE = 230.0
-    MAX_ONLINE_HOURS = 8
+    BUFFER_SIZE_SECONDS = 1200
     MAX_WINDOW_DAYS = 100
+    MAX_NUM_STATES = 1000
+    # These could be parameters
+    STEADY_THRESHOLD = 15
+    SIGNIFICANT_EDGE = 70
+    ONLINE_EDGE_NUM = 3
 
-    def __init__(self, installation_id, steady_states_list=pd.DataFrame(),
-                 transients_list=pd.DataFrame()):
-        # Initialise the necessary metadata
+    def __init__(self, installation_id):
+        # State variables
+        # TODO: remove the variables that are not needed
+        self._on_transition = False
+        self._running_edge_estimate = np.array([0.0, 0.0])
+        self._steady_count = 0
+        self._edge_count = 0
+        self._previous_steady_power = np.array([0.0, 0.0])
+        self._running_avg_power = np.array([0.0, 0.0])
+        self._last_measurement = 0.0
+        self._last_processed_ts = None
+        self._data = None
+        self._buffer = None
+        self._nbuffer = None
+        # Installation id (is this necessary?)
         self.installation_id = installation_id
-        self.steady_states_list = steady_states_list
-        self.transients_list = transients_list
-        self._data
+        # List of states and transitions detected so far.
+        self.steady_states = np.array([], dtype=np.float64).reshape(0, 2)
+        self.edges = np.array([], dtype=np.float64).reshape(0, 2)
+        # For online edge detection
+        self.online_edge_detected = False
+        self.online_edge = 0.0
 
-    def preprocessing(self, data):
+    @property
+    def data(self):
+        return self._data
+
+    @data.setter
+    def data(self, data):
         """
-        Data sanity checks and fixes before processing.
+        Setter for data variable. It also pre-processes the data and updates
+        a sliding window of BUFFER_SIZE_SECONDS of data.
         """
+        self._data = data
         # Check time difference
-        duration = (data.index[-1] - data.index[0]).astype('timedelta64[h]')
+        duration = (self._data.index[-1] - self._data.index[0]).astype('timedelta64[D]')
         if duration > self.MAX_WINDOW_DAYS:
-            # Do not process the window.
+            # Do not process the window, it's too long.
             raise ValueError('Data duration too long')
-        idx = pd.interval_range(start=data.index[0], end=data.index[-1],
-                                freq='S')
+        # Set to 1s sampling rate.
+        idx = pd.interval_range(start=data.index[0], end=data.index[-1], freq='S')
         self._data = data.reindex(index=idx, copy=True)
+        if self._buffer is None:
+            self._buffer = self.data.copy()
+        else:
+            self._buffer.append(self._data)
+        # Remove possible duplicate entries (keep the last entry), based on timestamp
+        self._buffer = self._buffer.loc[~self._buffer.index.duplicated(keep='last')]
+        # Keep only the last BUFFER_SIZE_SECONDS of the buffer
+        start_ts = self._buffer.index[-1] - pd.offsets.Second(self.BUFFER_SIZE_SECONDS-1)
+        self._buffer = self._buffer[self._buffer.index >= start_ts]
+        # Numpy buffer array
+        self._nbuffer = self._buffer.values
+        # TODO: Handle N/As and zero voltage
 
     def _normalisation(self):
         """
         Normalise power with voltage measurements
         """
-        self._data['active'] = (self._data['active'] *
-                                (self.NOMINAL_VOLTAGE / self._data['voltage'])
-                                ** 2)
-        self._data['reactive'] = (self._data['reactive'] *
-                                  (self.NOMINAL_VOLTAGE /
-                                   self._data['voltage']) ** 2)
+        self._data['active'] = (self._data['active'] * (self.NOMINAL_VOLTAGE /
+                                                        self._data['voltage']) ** 2)
+        self._data['reactive'] = (self._data['reactive'] * (self.NOMINAL_VOLTAGE /
+                                                            self._data['voltage']) ** 2)
+        # TODO: Handle this at the setter.
         self._data.dropna()
-
-    def _edge_detection_online(self, n_seconds=0, models=None):
-        """
-        Identify if there are edges in the last n_seconds of data. If yes, then
-        match them against a set of existing models to guess whether a device
-        was activated or not.
-        """
-        pass
 
     def _edge_detection(self):
         """
-        The regular edge detection step of the hart method. Identify steady
-        states and transitions based on active and reactive power.
+        Identify steady states and transitions based on active and reactive power.
         """
-        pass
+        self.online_edge_detected = False
+        self.online_edge = 0.0
+        if self._last_processed_ts is None:
+            data = self._buffer.values
+            prev = 0.0
+        else:
+            idx = self._last_processed_ts + 1*self._buffer.index.freq
+            prev = self._buffer.loc[self._last_processed_ts].values
+            data = self._buffer.loc[idx:].values
+        # d = data.diff()
+        # d.drop(d.index[0])
+        for i in range(data.shape[0]):
+            diff = data[i, :] - prev
+            prev = data[i, :]
+            if diff > self._STEADY_THRESHOLD:
+                if not self._on_transition:
+                    # Starting transition
+                    previous_edge = self._running_avg_power - self._previous_steady_power
+                    if previous_edge > self.SIGNIFICANT_EDGE:
+                        np.append(self.edges, previous_edge)
+                    self._previous_steady_power = self._running_avg_power
+                    np.append(self.steady_states, self._running_avg_power)
+                    self._running_avg_power = np.array([0.0, 0.0])
+                    self._steady_count = 0
+                    self._edge_count += 1
+                    self._running_edge_estimate = diff
+                    self._on_transition = True
+                else:
+                    # Either the transition continues, or it is the start of a steady
+                    # period.
+                    self._edge_count += 1
+                    self._running_edge_estimate += diff
+                    self._running_avg_power = data[i, :]
+                    self._steady_count = 1
+            else:
+                # Update running average
+                self._running_avg_power *= self._steady_count / \
+                                           (self._steady_count + 1.0)
+                self._running_avg_power += 1.0 / (self._steady_count + 1.0) * data[i, :]
+                self._steady_count += 1
+                if self._on_transition:
+                    # We are in the process of finishing a transition
+                    self._running_edge_estimate += diff
+                    if self._steady_count >= self.STEADY_THRESHOLD:
+                        self._on_transition = False
+                        self.online_edge_detected = True
+                        self.online_edge = self._running_edge_estimate
+        # Update last processed
+        self._last_processed_ts = self._buffer.index[-1]
+        self._last_measurement = self._buffer.iloc[-1]
 
     def _clustering(self):
         """
@@ -75,7 +151,11 @@ class Hart85eeris():
         Guess the appliance type using an unnamed hart model
         """
         pass
-        
+
+    def detect_online(self, data):
+        ndata = self._normalisation(data)
+        self._edge_detection(ndata)
+
     # # Code for this is adapted from nilmtk
     # def _edge_detection(self, data):
     #     """
@@ -89,7 +169,3 @@ class Hart85eeris():
     #     self.transients_list = self.transients_list.append(y)
     #     print(self.steady_states_list)
     #     print(self.transients_list)
-
-    def detect_online(self, data):
-        ndata = self._normalisation(data)
-        self._edge_detection(ndata)
