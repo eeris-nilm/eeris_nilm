@@ -18,7 +18,7 @@ class Hart85eeris():
     MAX_NUM_STATES = 1000
     # These could be parameters
     STEADY_THRESHOLD = 15
-    SIGNIFICANT_EDGE = 70
+    SIGNIFICANT_EDGE = 30
     STEADY_SAMPLES_NUM = 3
 
     def __init__(self, installation_id):
@@ -43,7 +43,7 @@ class Hart85eeris():
         self.edges = np.array([], dtype=np.float64).reshape(0, 2)
         # For online edge detection
         self.online_edge_detected = False
-        self.online_edge = 0.0
+        self.online_edge = np.array([0.0, 0.0])
 
     @property
     def data(self):
@@ -67,7 +67,9 @@ class Hart85eeris():
         if self._buffer is None:
             self._buffer = self.data.copy()
         else:
-            self._buffer.append(self._data)
+            self._buffer = self._buffer.append(self._data)  # More effective alternatives?
+            # Bug up to pandas 0.24, loses freq. Use inferred_freq instead.
+            self._buffer.index.freq = self._buffer.index.inferred_freq
         # Remove possible duplicate entries (keep the last entry), based on timestamp
         self._buffer = self._buffer.loc[~self._buffer.index.duplicated(keep='last')]
         # Keep only the last BUFFER_SIZE_SECONDS of the buffer
@@ -93,7 +95,7 @@ class Hart85eeris():
         Identify steady states and transitions based on active and reactive power.
         """
         self.online_edge_detected = False
-        self.online_edge = 0.0
+        self.online_edge = np.array([0.0, 0.0])
         if self._last_processed_ts is None:
             data = self._buffer.values
             prev = data[0, :]
