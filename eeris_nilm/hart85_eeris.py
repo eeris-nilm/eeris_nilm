@@ -1,3 +1,11 @@
+"""
+Until we decide on copyright & licensing issues:
+
+Written by Christos Diou <diou@auth.gr>
+Unauthorized copying of this file, via any medium is strictly prohibited
+Proprietary and confidential
+"""
+
 import numpy as np
 import pandas as pd
 
@@ -11,7 +19,7 @@ class Hart85eeris():
     # These could be parameters
     STEADY_THRESHOLD = 15
     SIGNIFICANT_EDGE = 70
-    ONLINE_EDGE_NUM = 3
+    STEADY_SAMPLES_NUM = 3
 
     def __init__(self, installation_id):
         # State variables
@@ -27,6 +35,7 @@ class Hart85eeris():
         self._data = None
         self._buffer = None
         self._nbuffer = None
+        self._samples_count = 0
         # Installation id (is this necessary?)
         self.installation_id = installation_id
         # List of states and transitions detected so far.
@@ -48,12 +57,12 @@ class Hart85eeris():
         """
         self._data = data
         # Check time difference
-        duration = (self._data.index[-1] - self._data.index[0]).astype('timedelta64[D]')
+        duration = (self._data.index[-1] - self._data.index[0]).days
         if duration > self.MAX_WINDOW_DAYS:
             # Do not process the window, it's too long.
             raise ValueError('Data duration too long')
         # Set to 1s sampling rate.
-        idx = pd.interval_range(start=data.index[0], end=data.index[-1], freq='S')
+        idx = pd.date_range(start=data.index[0], end=data.index[-1], freq='S')
         self._data = data.reindex(index=idx, copy=True)
         if self._buffer is None:
             self._buffer = self.data.copy()
@@ -87,24 +96,34 @@ class Hart85eeris():
         self.online_edge = 0.0
         if self._last_processed_ts is None:
             data = self._buffer.values
-            prev = 0.0
+            prev = data[0, :]
         else:
             idx = self._last_processed_ts + 1*self._buffer.index.freq
             prev = self._buffer.loc[self._last_processed_ts].values
             data = self._buffer.loc[idx:].values
         # d = data.diff()
         # d.drop(d.index[0])
+        # These are helper variables, to have a single np.concatenate/vstack at the end
+        edge_list = [self.edges]
+        steady_list = [self.steady_states]
         for i in range(data.shape[0]):
             diff = data[i, :] - prev
             prev = data[i, :]
-            if diff > self._STEADY_THRESHOLD:
+            if any(np.fabs(diff) > self.STEADY_THRESHOLD):
                 if not self._on_transition:
                     # Starting transition
-                    previous_edge = self._running_avg_power - self._previous_steady_power
-                    if previous_edge > self.SIGNIFICANT_EDGE:
-                        np.append(self.edges, previous_edge)
+                    # Do not register previous edge if it started from 0 (it may be due to
+                    # missing data).
+                    if any(self._previous_steady_power > np.finfo(float).eps):
+                        previous_edge = self._running_avg_power - \
+                                        self._previous_steady_power
+                        if any(np.fabs(previous_edge) > self.SIGNIFICANT_EDGE):
+                            edge_list.append(previous_edge)
+                            # self.edges = np.append(self.edges, previous_edge) # Too slow
                     self._previous_steady_power = self._running_avg_power
-                    np.append(self.steady_states, self._running_avg_power)
+                    steady_list.append(self._running_avg_power)
+                    # self.steady_states = np.append(self.steady_states,
+                    # self._running_avg_power)
                     self._running_avg_power = np.array([0.0, 0.0])
                     self._steady_count = 0
                     self._edge_count += 1
@@ -126,10 +145,15 @@ class Hart85eeris():
                 if self._on_transition:
                     # We are in the process of finishing a transition
                     self._running_edge_estimate += diff
-                    if self._steady_count >= self.STEADY_THRESHOLD:
+                    if self._steady_count >= self.STEADY_SAMPLES_NUM:
                         self._on_transition = False
                         self.online_edge_detected = True
                         self.online_edge = self._running_edge_estimate
+                        self._edge_count = 0
+            self._samples_count += 1
+        # Update lists
+        self.edges = np.vstack(edge_list)
+        self.steady_states = np.vstack(steady_list)
         # Update last processed
         self._last_processed_ts = self._buffer.index[-1]
         self._last_measurement = self._buffer.iloc[-1]
