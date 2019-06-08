@@ -15,7 +15,6 @@ import pandas as pd
 import os.path
 import datetime
 import matplotlib.pyplot as plt
-# import matplotlib.dates as mdates
 from eeris_nilm.hart85_eeris import Hart85eeris
 
 
@@ -106,7 +105,6 @@ for i in range(0, power.shape[0], plot_step):
         if model.online_edge_detected and not model.on_transition:
             est_y.append(np.array([prev] * (step // 2)))
             est_y.append(np.array([prev + model.online_edge[0]] * (step - step // 2)))
-            prev = prev + model.online_edge[0]
         elif model.on_transition:
             est_y.append(np.array([prev] * step))
         else:
@@ -120,9 +118,6 @@ for i in range(0, power.shape[0], plot_step):
     plt.grid()
     plt.plot(power.iloc[i:i + plot_step].index,
              power.iloc[i:i + plot_step]['active'].values)
-    # plt.plot(power.iloc[i:i + plot_step]['active'])
     plt.plot(power.iloc[i:i + plot_step].index, y, 'r')
     fig.autofmt_xdate()
-    # ax.fmt_xdata = mdates.DateFormatter('%H:%M:%S')
-    # ax.fmt_xdata = mdates.AutoDateFormatter()
     plt.pause(0.05)
