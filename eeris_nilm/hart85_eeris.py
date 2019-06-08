@@ -18,18 +18,18 @@ class Hart85eeris():
     MAX_NUM_STATES = 1000
     # These could be parameters
     STEADY_THRESHOLD = 15
-    SIGNIFICANT_EDGE = 30
+    SIGNIFICANT_EDGE = 50
     STEADY_SAMPLES_NUM = 3
 
     def __init__(self, installation_id):
         # State variables
         # TODO: remove the variables that are not needed
-        self._on_transition = False
+        self.on_transition = False
         self._running_edge_estimate = np.array([0.0, 0.0])
         self._steady_count = 0
         self._edge_count = 0
         self._previous_steady_power = np.array([0.0, 0.0])
-        self._running_avg_power = np.array([0.0, 0.0])
+        self.running_avg_power = np.array([0.0, 0.0])
         self._last_measurement = 0.0
         self._last_processed_ts = None
         self._data = None
@@ -55,6 +55,8 @@ class Hart85eeris():
         Setter for data variable. It also pre-processes the data and updates
         a sliding window of BUFFER_SIZE_SECONDS of data.
         """
+        if data.shape[0] == 0:
+            raise ValueError('Empty dataframe')
         self._data = data
         # Check time difference
         duration = (self._data.index[-1] - self._data.index[0]).days
@@ -73,7 +75,8 @@ class Hart85eeris():
         # Remove possible duplicate entries (keep the last entry), based on timestamp
         self._buffer = self._buffer.loc[~self._buffer.index.duplicated(keep='last')]
         # Keep only the last BUFFER_SIZE_SECONDS of the buffer
-        start_ts = self._buffer.index[-1] - pd.offsets.Second(self.BUFFER_SIZE_SECONDS-1)
+        start_ts = self._buffer.index[-1] - \
+            pd.offsets.Second(self.BUFFER_SIZE_SECONDS - 1)
         self._buffer = self._buffer[self._buffer.index >= start_ts]
         # Numpy buffer array
         self._nbuffer = self._buffer.values
@@ -90,7 +93,7 @@ class Hart85eeris():
         # TODO: Handle this at the setter.
         self._data.dropna()
 
-    def _edge_detection(self):
+    def edge_detection(self):
         """
         Identify steady states and transitions based on active and reactive power.
         """
@@ -100,7 +103,7 @@ class Hart85eeris():
             data = self._buffer.values
             prev = data[0, :]
         else:
-            idx = self._last_processed_ts + 1*self._buffer.index.freq
+            idx = self._last_processed_ts + 1 * self._buffer.index.freq
             prev = self._buffer.loc[self._last_processed_ts].values
             data = self._buffer.loc[idx:].values
         # d = data.diff()
@@ -112,43 +115,43 @@ class Hart85eeris():
             diff = data[i, :] - prev
             prev = data[i, :]
             if any(np.fabs(diff) > self.STEADY_THRESHOLD):
-                if not self._on_transition:
+                if not self.on_transition:
                     # Starting transition
                     # Do not register previous edge if it started from 0 (it may be due to
                     # missing data).
                     if any(self._previous_steady_power > np.finfo(float).eps):
-                        previous_edge = self._running_avg_power - \
-                                        self._previous_steady_power
+                        previous_edge = self.running_avg_power - \
+                            self._previous_steady_power
                         if any(np.fabs(previous_edge) > self.SIGNIFICANT_EDGE):
                             edge_list.append(previous_edge)
                             # self.edges = np.append(self.edges, previous_edge) # Too slow
-                    self._previous_steady_power = self._running_avg_power
-                    steady_list.append(self._running_avg_power)
+                    self._previous_steady_power = self.running_avg_power
+                    steady_list.append(self.running_avg_power)
                     # self.steady_states = np.append(self.steady_states,
-                    # self._running_avg_power)
-                    self._running_avg_power = np.array([0.0, 0.0])
+                    # self.running_avg_power)
+                    self.running_avg_power = np.array([0.0, 0.0])
                     self._steady_count = 0
                     self._edge_count += 1
                     self._running_edge_estimate = diff
-                    self._on_transition = True
+                    self.on_transition = True
                 else:
                     # Either the transition continues, or it is the start of a steady
                     # period.
                     self._edge_count += 1
                     self._running_edge_estimate += diff
-                    self._running_avg_power = data[i, :]
+                    self.running_avg_power = data[i, :]
                     self._steady_count = 1
             else:
                 # Update running average
-                self._running_avg_power *= self._steady_count / \
-                                           (self._steady_count + 1.0)
-                self._running_avg_power += 1.0 / (self._steady_count + 1.0) * data[i, :]
+                self.running_avg_power *= self._steady_count / \
+                    (self._steady_count + 1.0)
+                self.running_avg_power += 1.0 / (self._steady_count + 1.0) * data[i, :]
                 self._steady_count += 1
-                if self._on_transition:
+                if self.on_transition:
                     # We are in the process of finishing a transition
                     self._running_edge_estimate += diff
                     if self._steady_count >= self.STEADY_SAMPLES_NUM:
-                        self._on_transition = False
+                        self.on_transition = False
                         self.online_edge_detected = True
                         self.online_edge = self._running_edge_estimate
                         self._edge_count = 0
