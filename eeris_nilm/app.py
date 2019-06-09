@@ -1,3 +1,11 @@
+"""
+Until we decide on copyright & licensing issues:
+
+Written by Christos Diou <diou@auth.gr>
+Unauthorized copying of this file, via any medium is strictly prohibited
+Proprietary and confidential
+"""
+
 import sys
 import falcon
 import pymongo
@@ -18,6 +26,7 @@ def create_app(dburl, dbname):
     # Gunicorn expects the 'application' name
     api = falcon.API()
     api.add_route('/nilm/{inst_id}', NILM(mdb))
+
     return api
 
 

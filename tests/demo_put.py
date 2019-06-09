@@ -6,16 +6,21 @@ Unauthorized copying of this file, via any medium is strictly prohibited
 Proprietary and confidential
 """
 
-import falcon
 import numpy as np
 import pandas as pd
 import datetime
 import pickle
+import pymongo
+import sys
+import timeit
+import json
+import matplotlib.pyplot as plt
 
-from .hart85_eeris import Hart85eeris
+from tests import eco
+from eeris_nilm.hart85_eeris import Hart85eeris
 
 
-class NILM(object):
+class NILMtest(object):
     """
     Class to handle streamed data processing for NILM in eeRIS. It also maintains a
     document of the state of appliances in an installation.
@@ -31,15 +36,7 @@ class NILM(object):
         self._put_count = dict()
         self._prev = 0.0
 
-    def on_get(self, req, resp, inst_id):
-        """
-        On get, the service returns a document describing the status of a specific
-        installation.
-        """
-        # TODO
-        pass
-
-    def on_put(self, req, resp, inst_id):
+    def on_put(self, stream, inst_id):
         """
         This method receives new measurements and processes them to update the state of
         the installation. This is where most of the work is being done.
@@ -47,8 +44,8 @@ class NILM(object):
         req.stream must contain a json serialized Pandas dataframe (with at least
         timestamp as index, active, reactive power and voltage as columns).
         """
-        if req.content_length:
-            data = pd.read_json(req.stream)
+        if len(stream) > 0:
+            data = pd.read_json(stream)
         inst_iid = int(inst_id)
 
         # Update the models
@@ -92,9 +89,54 @@ class NILM(object):
                                           'model_hart': modelstr
                                           }
                                          })
-        resp.body = '{ "edge_detected": %s, "edge_size": [%f, %f], "est_y": %s }' % \
-                    (str(model.online_edge_detected).lower(),
-                     model.online_edge[0],
-                     model.online_edge[1],
-                     np.array2string(est_y, separator=', '))
-        resp.status = falcon.HTTP_200  # Default status
+        resp = '{ "edge_detected": %s, "edge_size": [%f, %f], "est_y": %s }' % \
+               (str(model.online_edge_detected).lower(),
+                model.online_edge[0],
+                model.online_edge[1],
+                np.array2string(est_y, separator=', '))
+        return resp
+
+
+dburl = "mongodb://localhost:27017/"
+dbname = "eeris"
+mclient = pymongo.MongoClient(dburl)
+dblist = mclient.list_database_names()
+if dbname in dblist:
+    mdb = mclient[dbname]
+else:
+    sys.stderr.write('ERROR: Database ' + dbname + ' not found. Exiting.')
+
+n = NILMtest(mdb)
+p = 'tests/data/01_sm_csv/01'
+date_start = '2012-06-19'
+date_end = '2012-06-19'
+step = 5
+plot_step = 3600
+base_url = 'http://localhost:8000/nilm/1'
+current_sec = 0
+
+phase_list, power = eco.read_eco(p, date_start, date_end)
+prev = power['active'].iloc[0]
+for i in range(0, power.shape[0], plot_step):
+    print("Seconds %d to %d\n" % (current_sec, current_sec + plot_step - 1))
+    est_y = list()
+    n_requests = 0
+    start = timeit.timeit()
+    for j in range(i, min(i + plot_step, power.shape[0]), step):
+        # print("Seconds %d to %d\n" % (current_sec, current_sec + step - 1))
+        data = power.iloc[j:j + step]
+        r_str = n.on_put(data.to_json(), 1)
+        r = json.loads(r_str)
+        est_y.append(np.array(r['est_y']))
+        n_requests += 1
+        current_sec += step
+    end = timeit.timeit()
+    print("Performed %d put requests in %f seconds" % (n_requests, start - end))
+    y = np.concatenate(est_y)
+    fig, ax = plt.subplots()
+    plt.grid()
+    plt.plot(power.iloc[i:i + plot_step].index,
+             power.iloc[i:i + plot_step]['active'].values)
+    plt.plot(power.iloc[i:i + plot_step].index, y, 'r')
+    fig.autofmt_xdate()
+    plt.pause(0.05)

@@ -11,17 +11,19 @@ Proprietary and confidential
 
 # Demo of edge detection without REST service implementation
 import numpy as np
+import requests
+import timeit
+import json
 import matplotlib.pyplot as plt
-from tests import eco
-from eeris_nilm.hart85_eeris import Hart85eeris
-
+#from tests import eco
+import eco
 
 p = 'tests/data/01_sm_csv/01'
 date_start = '2012-06-19'
 date_end = '2012-06-19'
 step = 5
 plot_step = 3600
-model = Hart85eeris(installation_id=1)
+base_url = 'http://localhost:8000/nilm/1'
 current_sec = 0
 
 phase_list, power = eco.read_eco(p, date_start, date_end)
@@ -29,24 +31,22 @@ prev = power['active'].iloc[0]
 for i in range(0, power.shape[0], plot_step):
     print("Seconds %d to %d\n" % (current_sec, current_sec + plot_step - 1))
     est_y = list()
+    n_requests = 0
+    start = timeit.timeit()
     for j in range(i, min(i + plot_step, power.shape[0]), step):
         # print("Seconds %d to %d\n" % (current_sec, current_sec + step - 1))
         data = power.iloc[j:j + step]
-        model.data = data
-        model.detect_edges()
-        if model.online_edge_detected and not model.on_transition:
-            est_y.append(np.array([prev] * (step // 2)))
-            est_y.append(np.array([prev + model.online_edge[0]] * (step - step // 2)))
-        elif model.on_transition:
-            # est_y.append(np.array([prev + model.running_edge_estimate[0]] * step))
-            est_y.append(np.array([prev] * step))
-        else:
-            est_y.append(np.array([model.running_avg_power[0]] * step))
-            prev = model.running_avg_power[0]
+        r = requests.put(base_url, data=data.to_json())
+        if r.status_code != 200:
+            print("Something went wrong, received HTTP %d" % (r.status_code))
+        resp = json.loads(r.text)
+        est_y.append(np.array(resp['est_y']))
+        n_requests += 1
         current_sec += step
-    print(model.edges)
-    print(model.steady_states)
+    end = timeit.timeit()
+    print("Performed %d put requests in %f seconds" % (n_requests, start - end))
     y = np.concatenate(est_y)
+    print("concatenation: %f seconds" % (start - end))
     fig, ax = plt.subplots()
     plt.grid()
     plt.plot(power.iloc[i:i + plot_step].index,

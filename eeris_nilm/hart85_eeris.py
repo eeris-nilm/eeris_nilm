@@ -13,19 +13,19 @@ import pandas as pd
 class Hart85eeris():
     """ Modified implementation of Hart's NILM algorithm. """
     NOMINAL_VOLTAGE = 230.0
-    BUFFER_SIZE_SECONDS = 1200
+    BUFFER_SIZE_SECONDS = 60
     MAX_WINDOW_DAYS = 100
     MAX_NUM_STATES = 1000
     # These could be parameters
-    STEADY_THRESHOLD = 15
-    SIGNIFICANT_EDGE = 50
-    STEADY_SAMPLES_NUM = 3
+    STEADY_THRESHOLD = 20
+    SIGNIFICANT_EDGE = 70
+    STEADY_SAMPLES_NUM = 5
 
     def __init__(self, installation_id):
         # State variables
         # TODO: remove the variables that are not needed
         self.on_transition = False
-        self._running_edge_estimate = np.array([0.0, 0.0])
+        self.running_edge_estimate = np.array([0.0, 0.0])
         self._steady_count = 0
         self._edge_count = 0
         self._previous_steady_power = np.array([0.0, 0.0])
@@ -34,7 +34,6 @@ class Hart85eeris():
         self._last_processed_ts = None
         self._data = None
         self._buffer = None
-        self._nbuffer = None
         self._samples_count = 0
         # Installation id (is this necessary?)
         self.installation_id = installation_id
@@ -66,23 +65,24 @@ class Hart85eeris():
         # Set to 1s sampling rate.
         idx = pd.date_range(start=data.index[0], end=data.index[-1], freq='S')
         self._data = data.reindex(index=idx, copy=True)
+        # Normalisation
+        self._normalise()
         if self._buffer is None:
-            self._buffer = self.data.copy()
+            self._buffer = self._data.copy()
         else:
             self._buffer = self._buffer.append(self._data)  # More effective alternatives?
-            # Bug up to pandas 0.24, loses freq. Use inferred_freq instead.
+            # Remove possible duplicate entries (keep the last entry), based on timestamp
+            self._buffer = self._buffer.loc[~self._buffer.index.duplicated(keep='last')]
+            self._buffer = self._buffer.sort_index()
+            # Bug up to pandas 0.24, loses freq.
             self._buffer.index.freq = self._buffer.index.inferred_freq
-        # Remove possible duplicate entries (keep the last entry), based on timestamp
-        self._buffer = self._buffer.loc[~self._buffer.index.duplicated(keep='last')]
         # Keep only the last BUFFER_SIZE_SECONDS of the buffer
         start_ts = self._buffer.index[-1] - \
             pd.offsets.Second(self.BUFFER_SIZE_SECONDS - 1)
         self._buffer = self._buffer[self._buffer.index >= start_ts]
-        # Numpy buffer array
-        self._nbuffer = self._buffer.values
         # TODO: Handle N/As and zero voltage
 
-    def _normalisation(self):
+    def _normalise(self):
         """
         Normalise power with voltage measurements
         """
@@ -93,19 +93,20 @@ class Hart85eeris():
         # TODO: Handle this at the setter.
         self._data.dropna()
 
-    def edge_detection(self):
+    def detect_edges(self):
         """
         Identify steady states and transitions based on active and reactive power.
         """
         self.online_edge_detected = False
         self.online_edge = np.array([0.0, 0.0])
         if self._last_processed_ts is None:
-            data = self._buffer.values
+            data = self._buffer[['active', 'reactive']].values
             prev = data[0, :]
         else:
+            tmp_df = self._buffer[['active', 'reactive']]
+            prev = tmp_df.loc[self._last_processed_ts].values
             idx = self._last_processed_ts + 1 * self._buffer.index.freq
-            prev = self._buffer.loc[self._last_processed_ts].values
-            data = self._buffer.loc[idx:].values
+            data = tmp_df.loc[idx:].values
         # d = data.diff()
         # d.drop(d.index[0])
         # These are helper variables, to have a single np.concatenate/vstack at the end
@@ -132,13 +133,13 @@ class Hart85eeris():
                     self.running_avg_power = np.array([0.0, 0.0])
                     self._steady_count = 0
                     self._edge_count += 1
-                    self._running_edge_estimate = diff
+                    self.running_edge_estimate = diff
                     self.on_transition = True
                 else:
                     # Either the transition continues, or it is the start of a steady
                     # period.
                     self._edge_count += 1
-                    self._running_edge_estimate += diff
+                    self.running_edge_estimate += diff
                     self.running_avg_power = data[i, :]
                     self._steady_count = 1
             else:
@@ -149,11 +150,11 @@ class Hart85eeris():
                 self._steady_count += 1
                 if self.on_transition:
                     # We are in the process of finishing a transition
-                    self._running_edge_estimate += diff
+                    self.running_edge_estimate += diff
                     if self._steady_count >= self.STEADY_SAMPLES_NUM:
                         self.on_transition = False
                         self.online_edge_detected = True
-                        self.online_edge = self._running_edge_estimate
+                        self.online_edge = self.running_edge_estimate
                         self._edge_count = 0
             self._samples_count += 1
         # Update lists
@@ -163,13 +164,13 @@ class Hart85eeris():
         self._last_processed_ts = self._buffer.index[-1]
         self._last_measurement = self._buffer.iloc[-1]
 
-    def _clustering(self):
+    def _cluster(self):
         """
         Clustering step of the hart method.
         """
         pass
 
-    def _matching(self):
+    def _match(self):
         """
         On/Off matching of the hart method
         """
@@ -180,21 +181,3 @@ class Hart85eeris():
         Guess the appliance type using an unnamed hart model
         """
         pass
-
-    def detect_online(self, data):
-        ndata = self._normalisation(data)
-        self._edge_detection(ndata)
-
-    # # Code for this is adapted from nilmtk
-    # def _edge_detection(self, data):
-    #     """
-    #     Identify periods of steady power consumption and of changing power
-    #     consumption.
-    #     """
-    #     data_p = data[['active', 'reactive']]
-    #     x, y = find_steady_states(data_p)
-    #     # Do this with queue rotation
-    #     self.steady_states_list = self.steady_states_list.append(x)
-    #     self.transients_list = self.transients_list.append(y)
-    #     print(self.steady_states_list)
-    #     print(self.transients_list)
