@@ -12,7 +12,7 @@ Proprietary and confidential
 # Demo of edge detection without REST service implementation
 import numpy as np
 import matplotlib.pyplot as plt
-from tests import eco
+import eco
 from eeris_nilm.hart85_eeris import Hart85eeris
 
 
@@ -31,9 +31,11 @@ for i in range(0, power.shape[0], plot_step):
     est_y = list()
     for j in range(i, min(i + plot_step, power.shape[0]), step):
         # print("Seconds %d to %d\n" % (current_sec, current_sec + step - 1))
+        if j == 7200:
+            pass
         data = power.iloc[j:j + step]
         model.data = data
-        model.detect_edges()
+        model.detect_edges_hart()
         if model.online_edge_detected and not model.on_transition:
             est_y.append(np.array([prev] * (step // 2)))
             est_y.append(np.array([prev + model.online_edge[0]] * (step - step // 2)))

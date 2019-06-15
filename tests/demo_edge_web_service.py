@@ -32,7 +32,7 @@ for i in range(0, power.shape[0], plot_step):
     print("Seconds %d to %d\n" % (current_sec, current_sec + plot_step - 1))
     est_y = list()
     n_requests = 0
-    start = timeit.timeit()
+    start = timeit.default_timer()
     for j in range(i, min(i + plot_step, power.shape[0]), step):
         # print("Seconds %d to %d\n" % (current_sec, current_sec + step - 1))
         data = power.iloc[j:j + step]
@@ -43,8 +43,8 @@ for i in range(0, power.shape[0], plot_step):
         est_y.append(np.array(resp['est_y']))
         n_requests += 1
         current_sec += step
-    end = timeit.timeit()
-    print("Performed %d put requests in %f seconds" % (n_requests, start - end))
+    end = timeit.default_timer()
+    print("Performed %d put requests in %f seconds" % (n_requests, end - start))
     y = np.concatenate(est_y)
     print("concatenation: %f seconds" % (start - end))
     fig, ax = plt.subplots()
