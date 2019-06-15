@@ -31,11 +31,10 @@ for i in range(0, power.shape[0], plot_step):
     est_y = list()
     for j in range(i, min(i + plot_step, power.shape[0]), step):
         # print("Seconds %d to %d\n" % (current_sec, current_sec + step - 1))
-        if j == 7200:
-            pass
         data = power.iloc[j:j + step]
         model.data = data
         model.detect_edges_hart()
+        model._match_edges()
         if model.online_edge_detected and not model.on_transition:
             est_y.append(np.array([prev] * (step // 2)))
             est_y.append(np.array([prev + model.online_edge[0]] * (step - step // 2)))
@@ -46,8 +45,8 @@ for i in range(0, power.shape[0], plot_step):
             est_y.append(np.array([model.running_avg_power[0]] * step))
             prev = model.running_avg_power[0]
         current_sec += step
-    print(model.edges)
-    print(model.steady_states)
+    print(model._edges)
+    print(model._steady_states)
     y = np.concatenate(est_y)
     fig, ax = plt.subplots()
     plt.grid()

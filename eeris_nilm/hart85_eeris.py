@@ -20,6 +20,7 @@ class Hart85eeris():
     STEADY_THRESHOLD = 15
     SIGNIFICANT_EDGE = 70
     STEADY_SAMPLES_NUM = 5
+    MATCH_THRESHOLD = 35
 
     def __init__(self, installation_id):
         # State / helper variables
@@ -40,9 +41,11 @@ class Hart85eeris():
         # List of states and transitions detected so far.
         # self.steady_states = np.array([], dtype=np.float64).reshape(0, 2)
         # self.edges = np.array([], dtype=np.float64).reshape(0, 2)
-        self.steady_states = pd.DataFrame([],
-                                          columns=['start', 'end', 'active', 'reactive'])
-        self.edges = pd.DataFrame([], columns=['start', 'end', 'active', 'reactive'])
+        self._steady_states = pd.DataFrame([],
+                                           columns=['start', 'end', 'active', 'reactive'])
+        self._edges = pd.DataFrame([], columns=['start', 'end', 'active',
+                                                'reactive', 'mark'])
+        self._matches = pd.DataFrame([], columns=['start', 'end', 'active', 'reactive'])
         self._edge_start_ts = None
         self._edge_end_ts = None
         self._steady_start_ts = None
@@ -127,8 +130,8 @@ class Hart85eeris():
         # d = data.diff()
         # d.drop(d.index[0])
         # These are helper variables, to have a single np.concatenate/vstack at the end
-        edge_list = [self.edges]
-        steady_list = [self.steady_states]
+        edge_list = [self._edges]
+        steady_list = [self._steady_states]
         for i in range(data.shape[0]):
             current_ts = idx + i * self._buffer.index.freq
             diff = data[i, :] - prev
@@ -145,10 +148,11 @@ class Hart85eeris():
                             edge_df = pd.DataFrame(data={'start': self._edge_start_ts,
                                                          'end': self._edge_end_ts,
                                                          'active': previous_edge[0],
-                                                         'reactive': previous_edge[1]},
+                                                         'reactive': previous_edge[1],
+                                                         'mark': False},
                                                    index=[0])
                             edge_list.append(edge_df)
-                            # self.edges = np.append(self.edges, previous_edge) # Too slow
+                            # self._edges = np.append(self._edges, previous_edge) Too slow
                     self._steady_end_ts = current_ts
                     steady_df = pd.DataFrame(data={'start': self._steady_start_ts,
                                                    'end': self._steady_end_ts,
@@ -191,8 +195,8 @@ class Hart85eeris():
                         self._edge_count = 0
             self._samples_count += 1
         # Update lists
-        self.edges = pd.concat(edge_list)
-        self.steady_states = pd.concat(steady_list)
+        self._edges = pd.concat(edge_list, ignore_index=True)
+        self._steady_states = pd.concat(steady_list, ignore_index=True)
         # Update last processed
         self._last_processed_ts = self._buffer.index[-1]
         self._last_measurement = self._buffer.iloc[-1]
@@ -207,10 +211,56 @@ class Hart85eeris():
         """
         On/Off matching using edges (as opposed to clusters). This is the method
         implemented by Hart for the two-state load monitor (it won't work directly for
-        multi-state appliances. It is implemented as close as possible to Hart's original
-        paper (1985).
+        multi-state appliances). It is implemented as close as possible to Hart's original
+        paper (1985). The approach is rather simplistic and can lead to serious errors.
         """
-        
+        if self._edges.empty:
+            return
+        pbuffer = self._edges[~(self._edges['mark']).astype(bool)]
+        # Double for loop, what are the alternatives?
+        for i in range(len(pbuffer)):
+            # Only check positive
+            if pbuffer.iloc[i]['active'] < 0:
+                continue
+            # Determine matching thresholds
+            e1 = pbuffer.iloc[i][['active', 'reactive']].values.astype(np.float64)
+            if e1[0] >= 1000:
+                t_active = 0.035 * e1[0]
+            else:
+                t_active = self.MATCH_THRESHOLD
+            if e1[1] >= 1000:
+                t_reactive = 0.035 * e1[1]
+            else:
+                t_reactive = self.MATCH_THRESHOLD
+            T = np.array([t_active, t_reactive])
+            for j in range(i+1, len(pbuffer)):
+                # Edge has been marked before or is positive
+                if pbuffer.iloc[j]['mark'] or pbuffer.iloc[j]['active'] > 0:
+                    continue
+                # Do they match?
+                e2 = pbuffer.iloc[j][['active', 'reactive']].values.astype(np.float64)
+                if all(np.fabs(e1 + e2) < T):
+                    # Match
+                    edge = (np.fabs(e1) + np.fabs(e2)) / 2.0
+                    df = pd.DataFrame({'start': pbuffer.iloc[i]['start'],
+                                       'end': pbuffer.iloc[j]['end'],
+                                       'active': edge[0],
+                                       'reactive': edge[1]}, index=[0])
+                    self._matches = self._matches.append(df, ignore_index=True)
+                    # Get the 'mark' column.
+                    c = self._edges.columns.get_loc('mark')
+                    pbuffer.iat[i, c] = True
+                    pbuffer.iat[j, c] = True
+                    break
+        self._clean_edges_buffer()
+
+    def _clean_edges_buffer(self):
+        """
+        Clean-up edges buffer. This removes matched edges from the buffer, but may also
+        remove edges that have remained in the buffer for a very long time, perform other
+        sanity checks etc. For now it is very simple, but is to be improved/updated.
+        """
+        self._edges.drop(self._edges.loc[self._edges['mark']].index, inplace=True)
 
     def _guess_type(self):
         """
