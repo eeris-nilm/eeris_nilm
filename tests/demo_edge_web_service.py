@@ -15,12 +15,12 @@ import requests
 import timeit
 import json
 import matplotlib.pyplot as plt
-#from tests import eco
+# from tests import eco
 import eco
 
 p = 'tests/data/01_sm_csv/01'
-date_start = '2012-06-19'
-date_end = '2012-06-19'
+date_start = '2012-06-19T00:00'
+date_end = '2012-06-19T23:59'
 step = 5
 plot_step = 3600
 base_url = 'http://localhost:8000/nilm/1'

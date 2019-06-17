@@ -12,7 +12,8 @@ import pandas as pd
 
 class Hart85eeris():
     """ Modified implementation of Hart's NILM algorithm. """
-    NOMINAL_VOLTAGE = 230.0
+    # NOMINAL_VOLTAGE = 230.0
+    NOMINAL_VOLTAGE = 240.0  # Just a test
     BUFFER_SIZE_SECONDS = 60
     MAX_WINDOW_DAYS = 100
     MAX_NUM_STATES = 1000
@@ -207,7 +208,7 @@ class Hart85eeris():
         """
         pass
 
-    def _match_edges(self):
+    def _match_edges_hart(self):
         """
         On/Off matching using edges (as opposed to clusters). This is the method
         implemented by Hart for the two-state load monitor (it won't work directly for
@@ -216,14 +217,17 @@ class Hart85eeris():
         """
         if self._edges.empty:
             return
-        pbuffer = self._edges[~(self._edges['mark']).astype(bool)]
+        # This returns a copy in pandas!
+        # pbuffer = self._edges.loc[~(self._edges['mark']).astype(bool)]
+        # Helper, to keep code tidy
+        e = self._edges
         # Double for loop, what are the alternatives?
-        for i in range(len(pbuffer)):
-            # Only check positive
-            if pbuffer.iloc[i]['active'] < 0:
+        for i in range(len(e)):
+            # Only check positive and unmarked
+            if e.iloc[i]['active'] < 0 or e.iloc[i]['mark']:
                 continue
             # Determine matching thresholds
-            e1 = pbuffer.iloc[i][['active', 'reactive']].values.astype(np.float64)
+            e1 = e.iloc[i][['active', 'reactive']].values.astype(np.float64)
             if e1[0] >= 1000:
                 t_active = 0.035 * e1[0]
             else:
@@ -233,24 +237,24 @@ class Hart85eeris():
             else:
                 t_reactive = self.MATCH_THRESHOLD
             T = np.array([t_active, t_reactive])
-            for j in range(i+1, len(pbuffer)):
+            for j in range(i+1, len(e)):
                 # Edge has been marked before or is positive
-                if pbuffer.iloc[j]['mark'] or pbuffer.iloc[j]['active'] > 0:
+                if e.iloc[j]['active'] >= 0 or e.iloc[j]['mark']:
                     continue
                 # Do they match?
-                e2 = pbuffer.iloc[j][['active', 'reactive']].values.astype(np.float64)
+                e2 = e.iloc[j][['active', 'reactive']].values.astype(np.float64)
                 if all(np.fabs(e1 + e2) < T):
                     # Match
                     edge = (np.fabs(e1) + np.fabs(e2)) / 2.0
-                    df = pd.DataFrame({'start': pbuffer.iloc[i]['start'],
-                                       'end': pbuffer.iloc[j]['end'],
+                    df = pd.DataFrame({'start': e.iloc[i]['start'],
+                                       'end': e.iloc[j]['end'],
                                        'active': edge[0],
                                        'reactive': edge[1]}, index=[0])
                     self._matches = self._matches.append(df, ignore_index=True)
                     # Get the 'mark' column.
-                    c = self._edges.columns.get_loc('mark')
-                    pbuffer.iat[i, c] = True
-                    pbuffer.iat[j, c] = True
+                    c = e.columns.get_loc('mark')
+                    e.iat[i, c] = True
+                    e.iat[j, c] = True
                     break
         self._clean_edges_buffer()
 

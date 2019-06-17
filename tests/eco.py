@@ -38,11 +38,12 @@ def read_eco(path, date_start, date_end):
 
     # d = datetime.date.fromisoformat(date_start)  # Only valid in python 3.7, dropped for
     # now.
-    d = datetime.datetime.strptime(date_start, '%Y-%m-%d')
-    d_end = datetime.datetime.strptime(date_end, '%Y-%m-%d')
+    d = datetime.datetime.strptime(date_start, '%Y-%m-%dT%H:%M')
+    d_end = datetime.datetime.strptime(date_end, '%Y-%m-%dT%H:%M')
     phase_df_list = [pd.DataFrame(), pd.DataFrame(), pd.DataFrame()]
     while d <= d_end:
-        print('Processing ' + d.strftime('%Y-%m-%d'))
+        print('ECO: Loading building ' + os.path.basename(path) + ', time ' +
+              d.strftime('%Y-%m-%dT%H:%M'))
         f = os.path.join(path, d.strftime('%Y-%m-%d') + '.csv')
         df = pd.read_csv(f, header=None, index_col=False, names=[i for i in range(1, 17)],
                          dtype=np.float32)
@@ -83,4 +84,7 @@ def read_eco(path, date_start, date_end):
     agg_df['voltage'] = (phase_df_list[0]['voltage'] +
                          phase_df_list[1]['voltage'] +
                          phase_df_list[2]['voltage']) / 3.0
+    for i in range(len(phase_df_list)):
+        phase_df_list[i] = phase_df_list[i][phase_df_list[i].index <= d_end]
+    agg_df = agg_df[agg_df.index <= d_end]
     return (phase_df_list, agg_df)

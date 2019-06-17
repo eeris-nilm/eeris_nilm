@@ -17,8 +17,8 @@ from eeris_nilm.hart85_eeris import Hart85eeris
 
 
 p = 'tests/data/01_sm_csv/01'
-date_start = '2012-06-19'
-date_end = '2012-06-19'
+date_start = '2012-06-19T:00:00'
+date_end = '2012-06-19T:23:59'
 step = 5
 plot_step = 3600
 model = Hart85eeris(installation_id=1)
@@ -26,7 +26,7 @@ current_sec = 0
 
 phase_list, power = eco.read_eco(p, date_start, date_end)
 prev = power['active'].iloc[0]
-for i in range(0, power.shape[0], plot_step):
+for i in range(0, power.shape[0] // 2, plot_step):
     print("Seconds %d to %d\n" % (current_sec, current_sec + plot_step - 1))
     est_y = list()
     for j in range(i, min(i + plot_step, power.shape[0]), step):
@@ -34,7 +34,7 @@ for i in range(0, power.shape[0], plot_step):
         data = power.iloc[j:j + step]
         model.data = data
         model.detect_edges_hart()
-        model._match_edges()
+        model._match_edges_hart()
         if model.online_edge_detected and not model.on_transition:
             est_y.append(np.array([prev] * (step // 2)))
             est_y.append(np.array([prev + model.online_edge[0]] * (step - step // 2)))
