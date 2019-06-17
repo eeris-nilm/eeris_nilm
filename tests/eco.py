@@ -38,7 +38,8 @@ def read_eco(path, date_start, date_end):
 
     # d = datetime.date.fromisoformat(date_start)  # Only valid in python 3.7, dropped for
     # now.
-    d = datetime.datetime.strptime(date_start, '%Y-%m-%dT%H:%M')
+    d_start = datetime.datetime.strptime(date_start, '%Y-%m-%dT%H:%M')
+    d = d_start
     d_end = datetime.datetime.strptime(date_end, '%Y-%m-%dT%H:%M')
     phase_df_list = [pd.DataFrame(), pd.DataFrame(), pd.DataFrame()]
     while d <= d_end:
@@ -85,6 +86,7 @@ def read_eco(path, date_start, date_end):
                          phase_df_list[1]['voltage'] +
                          phase_df_list[2]['voltage']) / 3.0
     for i in range(len(phase_df_list)):
-        phase_df_list[i] = phase_df_list[i][phase_df_list[i].index <= d_end]
-    agg_df = agg_df[agg_df.index <= d_end]
+        phase_df_list[i] = phase_df_list[i][(phase_df_list[i].index >= d_start) &
+                                            (phase_df_list[i].index <= d_end)]
+    agg_df = agg_df[(agg_df.index >= d_start) & (agg_df.index <= d_end)]
     return (phase_df_list, agg_df)

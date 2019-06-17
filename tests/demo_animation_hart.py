@@ -10,6 +10,7 @@ Proprietary and confidential
 """
 
 # Demo of edge detection without REST service implementation
+import datetime
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.animation as animation
@@ -19,16 +20,17 @@ from eeris_nilm.hart85_eeris import Hart85eeris
 
 class Demo(object):
     TIME_WINDOW = 1200
-    
+
     def __init__(self, ax):
         # Load data
         p = 'tests/data/01_sm_csv/01'
-        date_start = '2012-06-19T00:00'
-        date_end = '2012-06-19T23:59'
+        self.date_start = '2012-06-19T08:00'
+        self.date_end = '2012-06-19T23:59'
         self.step = 5
-        self.phase_list, self.power = eco.read_eco(p, date_start, date_end)
+        self.phase_list, self.power = eco.read_eco(p, self.date_start, self.date_end)
         self.xdata, self.ydata = [], []
         self.yest = np.array([], dtype='float64')
+        self.ymatch = None
 
         # Prepare model
         self.model = Hart85eeris(installation_id=1)
@@ -39,6 +41,7 @@ class Demo(object):
         self.ax = ax
         self.line_orig, = ax.plot([], [], 'b')
         self.line_est, = ax.plot([], [], 'r')
+        self.line_match, = ax.plot([], [], 'm')
         self.ax.set_xlim(0, 100)
         self.ax.set_ylim(-100, 1000)
         self.ax.grid(True)
@@ -57,11 +60,18 @@ class Demo(object):
             data = self.power.iloc[i:i+self.step]
             yield i, data
 
+    def _match_helper(self, start, end, active):
+        g_start = datetime.datetime.strptime(self.date_start, '%Y-%m-%dT%H:%M')
+        start_sec = (start - g_start).seconds
+        end_sec = (end - g_start).seconds
+        self.ymatch[start_sec:end_sec] += active
+
     def __call__(self, data):
         t, y = data
         self.model.data = y
         self.model.detect_edges_hart()
         self.model._match_edges_hart()
+        # Define yest, for edges
         if self.model.online_edge_detected and not self.model.on_transition:
             est_y = np.array([self.prev] * (self.step // 2))
             self.yest = np.concatenate([self.yest, est_y, np.array(
@@ -73,6 +83,13 @@ class Demo(object):
                                         np.array([self.model.running_avg_power[0]] *
                                                  self.step)])
             self.prev = self.model.running_avg_power[0]
+        # Define ymatch, for matches. Quick and dirty (very inefficient)
+        self.ymatch = np.zeros(t + self.step)
+        [self._match_helper(x, y, z)
+         for x, y, z in
+         zip(self.model._matches['start'],
+             self.model._matches['end'],
+             self.model._matches['active'])]
         self.current_sec += self.step
         # Update lines
         self.xdata.extend(list(range(t, t + self.step)))
@@ -80,7 +97,8 @@ class Demo(object):
         lim = max(len(self.xdata), self.TIME_WINDOW)
         self.line_orig.set_data(self.xdata[-lim:], self.ydata[-lim:])
         self.line_est.set_data(self.xdata[-lim:], self.yest.tolist()[-lim:])
-        # Update axes limits
+        self.line_match.set_data(self.xdata[-lim:], self.ymatch.tolist()[-lim:])
+        # Update axis limits
         xmin, xmax = self.ax.get_xlim()
         xmin = max(0, t - self.TIME_WINDOW)
         xmax = max(self.TIME_WINDOW, t + self.step)
@@ -91,7 +109,7 @@ class Demo(object):
         ax.figure.canvas.draw()
         # TODO (for dates)
         # self.xdata.extend(y.index.strftime('%Y-%m-%d %H:%M:%S').tolist())
-        return self.line_orig, self.line_est
+        return self.line_orig, self.line_est, self.line_match
 
 
 fig = plt.figure()
