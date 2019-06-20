@@ -12,6 +12,7 @@ Proprietary and confidential
 # Demo of edge detection without REST service implementation
 import matplotlib.pyplot as plt
 import matplotlib.animation as animation
+from matplotlib.table import table
 import eco
 from eeris_nilm.hart85_eeris import Hart85eeris
 
@@ -19,14 +20,14 @@ from eeris_nilm.hart85_eeris import Hart85eeris
 class Demo(object):
     TIME_WINDOW = 1200
 
-    def __init__(self, ax):
+    def __init__(self, ax, axt):
         # Load data
         p = 'tests/data/01_sm_csv/01'
-        self.date_start = '2012-06-19T11:00'
+        self.date_start = '2012-06-19T11:40'
         self.date_end = '2012-06-19T23:59'
         self.step = 5
         self.phase_list, self.power = eco.read_eco(p, self.date_start, self.date_end)
-        self.xdata, self.ydata = [], []
+        self.xdata, self.ydata, self.ydata_r = [], [], []
         self.ymatch = None
 
         # Prepare model
@@ -36,7 +37,8 @@ class Demo(object):
 
         # Plot parameters
         self.ax = ax
-        self.line_orig, = ax.plot([], [], 'b')
+        self.line_active, = ax.plot([], [], 'b')
+        self.line_reactive, = ax.plot([], [], 'c')
         self.line_est, = ax.plot([], [], 'r')
         self.line_match, = ax.plot([], [], 'm')
         self.ax.set_xlim(0, 100)
@@ -44,10 +46,15 @@ class Demo(object):
         self.ax.grid(True)
         self.time_window = min(self.TIME_WINDOW, self.model.MAX_DISPLAY_SECONDS)
 
+        # Table plot parameters
+        self.axt = axt
+        self.axt.set_axis_off()
+
     def init(self):
-        self.line_orig.set_data([], [])
+        self.line_active.set_data([], [])
+        self.line_reactive.set_data([], [])
         self.line_est.set_data([], [])
-        return (self.line_orig, self.line_est)
+        return (self.line_active, self.line_reactive, self.line_est)
 
     def data_gen(self):
         lim = self.power.shape[0] - self.power.shape[0] % self.step
@@ -64,31 +71,47 @@ class Demo(object):
         self.model.detect_edges_hart()
         self.model._match_edges_hart()
         self.model._update_live()
+        self.model._match_edges_hart_live()
         self.current_sec += self.step
         # Update lines
         self.xdata.extend(list(range(t, t + self.step)))
         self.ydata.extend(y['active'].values.tolist())
+        self.ydata_r.extend(y['reactive'].values.tolist())
         lim = max(len(self.xdata), self.time_window)
-        self.line_orig.set_data(self.xdata[-lim:], self.ydata[-lim:])
+        self.line_active.set_data(self.xdata[-lim:], self.ydata[-lim:])
+        self.line_reactive.set_data(self.xdata[-lim:], self.ydata_r[-lim:])
         self.line_est.set_data(self.xdata[-lim:], self.model._yest.tolist()[-lim:])
         self.line_match.set_data(self.xdata[-lim:], self.model._ymatch.tolist()[-lim:])
         # Update axis limits
         xmin, xmax = self.ax.get_xlim()
         xmin = max(0, t - self.time_window)
         xmax = max(self.time_window, t + self.step)
-        ymin = min(self.ydata[-self.time_window:])
-        ymax = max(self.ydata[-self.time_window:])
+        ymin = min(self.ydata[-self.time_window:] + self.ydata_r[-self.time_window:])
+        ymax = max(self.ydata[-self.time_window:] + self.ydata_r[-self.time_window:])
         self.ax.set_xlim(xmin - 100, xmax + 100)
         self.ax.set_ylim(ymin - 50, ymax + 100)
         self.ax.figure.canvas.draw()
+        # Add table
+        if self.model.live.empty:
+            cell_text = [['None', '-', '-']]
+        else:
+            cell_text = [self.model.live.iloc[i][['name', 'active', 'reactive']].tolist()
+                         for i in range(self.model.live.shape[0])]
+        tab = table(self.axt, cell_text, colLabels=['Appliance', 'Active', 'Reactive'],
+                    loc='center', rowLoc='center', colLoc='left', edges='horizontal')
+        self.axt.clear()
+        self.axt.add_table(tab)
+        self.axt.set_axis_off()
+        self.axt.figure.canvas.draw()
         # TODO (for dates)
         # self.xdata.extend(y.index.strftime('%Y-%m-%d %H:%M:%S').tolist())
-        return self.line_orig, self.line_est, self.line_match
+        return self.line_active, self.line_reactive, self.line_est, self.line_match
 
 
 fig = plt.figure()
-ax = plt.subplot(1, 1, 1)
-d = Demo(ax)
+ax = plt.subplot(2, 1, 1)
+axt = plt.subplot(2, 1, 2)
+d = Demo(ax, axt)
 ani = animation.FuncAnimation(fig, d, frames=d.data_gen, init_func=d.init, interval=0,
                               fargs=None, blit=False, repeat=False)
 plt.show()

@@ -41,6 +41,7 @@ class Hart85eeris():
         self._idx = None
         self._yest = np.array([], dtype='float64')
         self._ymatch = None
+        self._ymatch_live = None
         # Installation id (is this necessary?)
         self.installation_id = installation_id
         # List of states and transitions detected so far.
@@ -58,6 +59,8 @@ class Hart85eeris():
         # For online edge detection
         self.online_edge_detected = False
         self.online_edge = np.array([0.0, 0.0])
+        self._appliance_id = 0
+        self.live = pd.DataFrame(columns=['name', 'active', 'reactive'])
 
     @property
     def data(self):
@@ -94,7 +97,8 @@ class Hart85eeris():
             self._data = self._buffer
             self._idx = self._buffer.index[0]
             self._steady_start_ts = self._idx
-            self._est_prev = self._data['active'].iloc[0]
+            # self._previous_steady_power = self._data.iloc[0]
+            # self._est_prev = self._data['active'].iloc[0]
         else:
             self._idx = self._last_processed_ts + 1 * self._buffer.index.freq
             self._data = self._buffer.loc[self._idx:]
@@ -110,11 +114,12 @@ class Hart85eeris():
         # Set to 1s sampling rate.
         df_idx = pd.date_range(start=data.index[0], end=data.index[-1], freq='S')
         r_data = data.reindex(index=df_idx, copy=True)
-        # Normalisation
-        r_data['active'] = (r_data['active'] * (self.NOMINAL_VOLTAGE /
-                                                r_data['voltage']) ** 2)
-        r_data['reactive'] = (r_data['reactive'] * (self.NOMINAL_VOLTAGE /
-                                                    r_data['voltage']) ** 2)
+        # Normalisation. Raise active power to 1.5 and reactive power to 2.5. See Hart's
+        # 1985 paper for an explanation.
+        r_data['active'] = r_data['active'] * np.power((self.NOMINAL_VOLTAGE /
+                                                        r_data['voltage']), 1.5)
+        r_data['reactive'] = r_data['reactive'] * np.power((self.NOMINAL_VOLTAGE /
+                                                            r_data['voltage']), 2.5)
         return r_data
 
     def detect_edges(self):
@@ -199,7 +204,9 @@ class Hart85eeris():
                         self._steady_start_ts = current_ts
                         self.on_transition = False
                         self.online_edge_detected = True
-                        self.online_edge = self.running_edge_estimate
+                        # self.online_edge = self.running_edge_estimate
+                        self.online_edge = self.running_avg_power - \
+                            self._previous_steady_power
                         self._edge_count = 0
             self._samples_count += 1
         # Update lists
@@ -244,11 +251,11 @@ class Hart85eeris():
             # Determine matching thresholds
             e1 = e.iloc[i][['active', 'reactive']].values.astype(np.float64)
             if e1[0] >= 1000:
-                t_active = 0.035 * e1[0]
+                t_active = 0.05 * e1[0]
             else:
                 t_active = self.MATCH_THRESHOLD
-            if e1[1] >= 1000:
-                t_reactive = 0.035 * e1[1]
+            if np.fabs(e1[1]) >= 1000:
+                t_reactive = 0.05 * e1[1]
             else:
                 t_reactive = self.MATCH_THRESHOLD
             T = np.array([t_active, t_reactive])
@@ -258,7 +265,9 @@ class Hart85eeris():
                     continue
                 # Do they match?
                 e2 = e.iloc[j][['active', 'reactive']].values.astype(np.float64)
-                if all(np.fabs(e1 + e2) < T):
+                # if all(np.fabs(e1 + e2) < T):
+                # For now, using only active power
+                if np.fabs(e1[0] + e2[0]) < T[0]:
                     # Match
                     edge = (np.fabs(e1) + np.fabs(e2)) / 2.0
                     df = pd.DataFrame({'start': e.iloc[i]['start'],
@@ -273,6 +282,65 @@ class Hart85eeris():
                     break
         self._clean_edges_buffer()
 
+    def _match_edges_hart_live(self):
+        """
+        Version of Hart's edge matching algorithm to support the "live" display of eeRIS.
+        """
+        if not self.online_edge_detected:
+            if self.live.empty:
+                return
+            if self.on_transition:
+                last = self.live.index[-1]
+                self.live.at[last, 'final'] = True
+                return
+            # Update last edge
+            last = self.live.index[-1]
+            if not self.live.loc[last]['final']:
+                self.live.at[last, 'active'] = \
+                    self.running_avg_power[0] - self._previous_steady_power[0]
+                self.live.at[last, 'reactive'] = \
+                    self.running_avg_power[1] - self._previous_steady_power[1]
+            return
+        e = self.online_edge
+        if all(np.fabs(e) < self.SIGNIFICANT_EDGE):
+            # Although no edge is added, previous should be finalised
+            if not self.live.empty:
+                last = self.live.index[-1]
+                self.live.at[last, 'final'] = True
+            return
+        if e[0] > 0:
+            # Appliance cycle start
+            df = pd.DataFrame({'name': 'Appliance %d' % (self._appliance_id),
+                               'active': e[0],
+                               'reactive': e[1],
+                               'previous_active': self._previous_steady_power[0],
+                               'previous_reactive': self._previous_steady_power[1],
+                               'final': False},
+                              index=[0])
+            self.live = self.live.append(df, ignore_index=True)
+            self._appliance_id += 1
+            return
+        # Appliance cycle stop. Does it match against previous edges?
+        for i in reversed(range(self.live.shape[0])):
+            e0 = self.live.iloc[i][['active', 'reactive']].values.astype(np.float64)
+            if e[0] <= -1000:
+                t_active = 0.05 * e[0]
+            else:
+                t_active = self.MATCH_THRESHOLD
+            if np.fabs(e[1]) >= 1000:
+                t_reactive = 0.05 * e[1]
+            else:
+                t_reactive = self.MATCH_THRESHOLD
+            T = np.fabs(np.array([t_active, t_reactive]))
+            # Match only with active power for now
+            if np.fabs(e[0] + e0[0]) < T[0]:
+                # Match. Remove device from live
+                self.live.drop(self.live.index[i], inplace=True)
+                # Finalise all existing live edges and break
+                for i in self.live.index:
+                    self.live.at[i, 'final'] = True
+                break
+
     def _match_helper(self, start, end, active):
         end_sec_inv = (self._last_processed_ts - end).seconds
         if end_sec_inv > self.MAX_DISPLAY_SECONDS:
@@ -286,20 +354,26 @@ class Hart85eeris():
         """
         Provide information for display at the eeRIS "live" screen. Preliminary version.
         """
-        prev = self._est_prev
+        # prev = self._est_prev
         step = self._data.shape[0]
         # Update yest
         if self.online_edge_detected and not self.on_transition:
+            prev = self._previous_steady_power[0]
             y1 = np.array([prev] * (step // 2))
             y2 = np.array([prev + self.online_edge[0]] * (step - step // 2))
             self._yest = np.concatenate([self._yest, y1, y2])
+            # self._est_prev = self._previous_steady_power[0]
+            # prev = self._est_prev
         elif self.on_transition:
-            self._yest = np.concatenate([self._yest, np.array([prev] * step)])
+            self._yest = np.concatenate(
+                [self._yest, np.array([self._previous_steady_power[0]] * step)]
+            )
         else:
-            self._yest = np.concatenate([self._yest,
-                                        np.array([self.running_avg_power[0]] *
-                                                 step)])
-            self._est_prev = self.running_avg_power[0]
+            self._yest = np.concatenate(
+                [self._yest, np.array([self.running_avg_power[0]] * step)]
+            )
+            # self._est_prev = self.running_avg_power[0]
+            # prev = self._est_prev
         if self._yest.shape[0] > self.MAX_DISPLAY_SECONDS:
             self._yest = self._yest[-self.MAX_DISPLAY_SECONDS:]
         # Update ymatch
