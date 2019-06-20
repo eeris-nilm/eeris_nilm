@@ -40,6 +40,7 @@ def read_eco(path, date_start, date_end):
     # now.
     d_start = datetime.datetime.strptime(date_start, '%Y-%m-%dT%H:%M')
     d = d_start
+    start_day = datetime.datetime(d.year, d.month, d.day)
     d_end = datetime.datetime.strptime(date_end, '%Y-%m-%dT%H:%M')
     phase_df_list = [pd.DataFrame(), pd.DataFrame(), pd.DataFrame()]
     while d <= d_end:
@@ -57,7 +58,7 @@ def read_eco(path, date_start, date_end):
             df_phase['Q'] = reactive
             # No timezone
             df_phase.index = pd.date_range(
-                start=d.isoformat(), periods=3600 * 24, freq='S')
+                start=start_day, periods=3600 * 24, freq='S')
             column_names = {
                 1 + phase: 'active',
                 5 + phase: 'current',
@@ -86,7 +87,7 @@ def read_eco(path, date_start, date_end):
                          phase_df_list[1]['voltage'] +
                          phase_df_list[2]['voltage']) / 3.0
     for i in range(len(phase_df_list)):
-        phase_df_list[i] = phase_df_list[i][(phase_df_list[i].index >= d_start) &
-                                            (phase_df_list[i].index <= d_end)]
-    agg_df = agg_df[(agg_df.index >= d_start) & (agg_df.index <= d_end)]
+        phase_df_list[i] = phase_df_list[i].loc[(phase_df_list[i].index >= d_start) &
+                                                (phase_df_list[i].index <= d_end)]
+    agg_df = agg_df.loc[(agg_df.index >= d_start) & (agg_df.index <= d_end)]
     return (phase_df_list, agg_df)

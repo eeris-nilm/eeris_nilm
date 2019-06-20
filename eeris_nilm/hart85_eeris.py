@@ -17,6 +17,7 @@ class Hart85eeris():
     BUFFER_SIZE_SECONDS = 60
     MAX_WINDOW_DAYS = 100
     MAX_NUM_STATES = 1000
+    MAX_DISPLAY_SECONDS = 10 * 3600
     # These could be parameters
     STEADY_THRESHOLD = 15
     SIGNIFICANT_EDGE = 70
@@ -37,6 +38,9 @@ class Hart85eeris():
         self._data = None
         self._buffer = None
         self._samples_count = 0
+        self._idx = None
+        self._yest = np.array([], dtype='float64')
+        self._ymatch = None
         # Installation id (is this necessary?)
         self.installation_id = installation_id
         # List of states and transitions detected so far.
@@ -67,21 +71,16 @@ class Hart85eeris():
         """
         if data.shape[0] == 0:
             raise ValueError('Empty dataframe')
-        self._data = data
         # Check time difference
-        duration = (self._data.index[-1] - self._data.index[0]).days
+        duration = (data.index[-1] - data.index[0]).days
         if duration > self.MAX_WINDOW_DAYS:
             # Do not process the window, it's too long.
             raise ValueError('Data duration too long')
-        # Set to 1s sampling rate.
-        idx = pd.date_range(start=data.index[0], end=data.index[-1], freq='S')
-        self._data = data.reindex(index=idx, copy=True)
-        # Normalisation
-        self._normalise()
+        tmp_data = self._normalise(data)
         if self._buffer is None:
-            self._buffer = self._data.copy()
+            self._buffer = tmp_data.copy()
         else:
-            self._buffer = self._buffer.append(self._data)  # More effective alternatives?
+            self._buffer = self._buffer.append(tmp_data)  # More effective alternatives?
             # Remove possible duplicate entries (keep the last entry), based on timestamp
             self._buffer = self._buffer.loc[~self._buffer.index.duplicated(keep='last')]
             self._buffer = self._buffer.sort_index()
@@ -91,19 +90,32 @@ class Hart85eeris():
         start_ts = self._buffer.index[-1] - \
             pd.offsets.Second(self.BUFFER_SIZE_SECONDS - 1)
         self._buffer = self._buffer[self._buffer.index >= start_ts]
+        if self._last_processed_ts is None:
+            self._data = self._buffer
+            self._idx = self._buffer.index[0]
+            self._steady_start_ts = self._idx
+            self._est_prev = self._data['active'].iloc[0]
+        else:
+            self._idx = self._last_processed_ts + 1 * self._buffer.index.freq
+            self._data = self._buffer.loc[self._idx:]
+
         # TODO: Handle N/As and zero voltage.
         # TODO: Unit tests with all the unusual cases
 
-    def _normalise(self):
+    def _normalise(self, data):
         """
-        Normalise power with voltage measurements
+        Resample data to 1s and normalise power with voltage measurements. Drop missing
+        values.
         """
-        self._data['active'] = (self._data['active'] * (self.NOMINAL_VOLTAGE /
-                                                        self._data['voltage']) ** 2)
-        self._data['reactive'] = (self._data['reactive'] * (self.NOMINAL_VOLTAGE /
-                                                            self._data['voltage']) ** 2)
-        # TODO: Handle this at the setter.
-        self._data.dropna()
+        # Set to 1s sampling rate.
+        df_idx = pd.date_range(start=data.index[0], end=data.index[-1], freq='S')
+        r_data = data.reindex(index=df_idx, copy=True)
+        # Normalisation
+        r_data['active'] = (r_data['active'] * (self.NOMINAL_VOLTAGE /
+                                                r_data['voltage']) ** 2)
+        r_data['reactive'] = (r_data['reactive'] * (self.NOMINAL_VOLTAGE /
+                                                    r_data['voltage']) ** 2)
+        return r_data
 
     def detect_edges(self):
         """
@@ -120,21 +132,16 @@ class Hart85eeris():
         self.online_edge = np.array([0.0, 0.0])
         if self._last_processed_ts is None:
             data = self._buffer[['active', 'reactive']].values
-            idx = self._buffer.index[0]
-            self._steady_start_ts = idx
             prev = data[0, :]
         else:
             tmp_df = self._buffer[['active', 'reactive']]
             prev = tmp_df.loc[self._last_processed_ts].values
-            idx = self._last_processed_ts + 1 * self._buffer.index.freq
-            data = tmp_df.loc[idx:].values
-        # d = data.diff()
-        # d.drop(d.index[0])
+            data = tmp_df.loc[self._idx:].values
         # These are helper variables, to have a single np.concatenate/vstack at the end
         edge_list = [self._edges]
         steady_list = [self._steady_states]
         for i in range(data.shape[0]):
-            current_ts = idx + i * self._buffer.index.freq
+            current_ts = self._idx + i * self._buffer.index.freq
             diff = data[i, :] - prev
             prev = data[i, :]
             if any(np.fabs(diff) > self.STEADY_THRESHOLD):
@@ -208,6 +215,14 @@ class Hart85eeris():
         """
         pass
 
+    def _clean_edges_buffer(self):
+        """
+        Clean-up edges buffer. This removes matched edges from the buffer, but may also
+        remove edges that have remained in the buffer for a very long time, perform other
+        sanity checks etc. For now it is very simple, but is to be improved/updated.
+        """
+        self._edges.drop(self._edges.loc[self._edges['mark']].index, inplace=True)
+
     def _match_edges_hart(self):
         """
         On/Off matching using edges (as opposed to clusters). This is the method
@@ -258,13 +273,42 @@ class Hart85eeris():
                     break
         self._clean_edges_buffer()
 
-    def _clean_edges_buffer(self):
+    def _match_helper(self, start, end, active):
+        end_sec_inv = (self._last_processed_ts - end).seconds
+        if end_sec_inv > self.MAX_DISPLAY_SECONDS:
+            return
+        start_sec_inv = (self._last_processed_ts - start).seconds
+        if start_sec_inv > self.MAX_DISPLAY_SECONDS:
+            start_sec_inv = self.MAX_DISPLAY_SECONDS
+        self._ymatch[-start_sec_inv:-end_sec_inv] += active
+
+    def _update_live(self):
         """
-        Clean-up edges buffer. This removes matched edges from the buffer, but may also
-        remove edges that have remained in the buffer for a very long time, perform other
-        sanity checks etc. For now it is very simple, but is to be improved/updated.
+        Provide information for display at the eeRIS "live" screen. Preliminary version.
         """
-        self._edges.drop(self._edges.loc[self._edges['mark']].index, inplace=True)
+        prev = self._est_prev
+        step = self._data.shape[0]
+        # Update yest
+        if self.online_edge_detected and not self.on_transition:
+            y1 = np.array([prev] * (step // 2))
+            y2 = np.array([prev + self.online_edge[0]] * (step - step // 2))
+            self._yest = np.concatenate([self._yest, y1, y2])
+        elif self.on_transition:
+            self._yest = np.concatenate([self._yest, np.array([prev] * step)])
+        else:
+            self._yest = np.concatenate([self._yest,
+                                        np.array([self.running_avg_power[0]] *
+                                                 step)])
+            self._est_prev = self.running_avg_power[0]
+        if self._yest.shape[0] > self.MAX_DISPLAY_SECONDS:
+            self._yest = self._yest[-self.MAX_DISPLAY_SECONDS:]
+        # Update ymatch
+        self._ymatch = np.zeros_like(self._yest)
+        [self._match_helper(x, y, z)
+         for x, y, z in
+         zip(self._matches['start'],
+             self._matches['end'],
+             self._matches['active'])]
 
     def _guess_type(self):
         """
