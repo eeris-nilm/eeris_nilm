@@ -9,7 +9,7 @@ Proprietary and confidential
 import falcon
 import numpy as np
 import pandas as pd
-import datetime
+import datetime as dt
 import pickle
 
 from .hart85_eeris import Hart85eeris
@@ -36,8 +36,21 @@ class NILM(object):
         On get, the service returns a document describing the status of a specific
         installation.
         """
-        # TODO
-        pass
+        inst_iid = int(inst_id)
+        # Load the model, if not loaded already
+        if (inst_iid not in self._models.keys()):
+            inst_doc = self._mdb.models.find_one({"meterId": inst_iid})
+            if inst_doc is None:
+                raise falcon.HTTPBadRequest("Installation does not exist",
+                                            "You have requested data from " +
+                                            "an installation that does not exist")
+            else:
+                self._models[inst_iid] = pickle.loads(inst_doc['model_hart'])
+        model = self._models[inst_iid]
+        live = model.live[['name', 'active', 'reactive']].to_json()
+        ts = dt.datetime.now().strftime('%Y-%m-%dT%H:%M%z')
+        resp.body = '{ timestamp: %s, appliances: %s }' % (ts, live)
+        resp.status = falcon.HTTP_200
 
     def on_put(self, req, resp, inst_id):
         """
@@ -49,37 +62,28 @@ class NILM(object):
         """
         if req.content_length:
             data = pd.read_json(req.stream)
+        else:
+            raise falcon.HTTPBadRequest("No data provided", "No data provided")
         inst_iid = int(inst_id)
 
-        # Update the models
+        # Load the model, if not available
         if (inst_iid not in self._models.keys()):
             inst_doc = self._mdb.models.find_one({"meterId": inst_iid})
             if inst_doc is None:
                 modelstr = pickle.dumps(Hart85eeris(installation_id=inst_iid))
                 inst_doc = {'meterId': inst_iid,
-                            'lastUpdate': str(datetime.datetime.now()),
+                            'lastUpdate': dt.datetime.now().strftime('%Y-%m-%dT%H:%M%z'),
                             'model_hart': modelstr}
                 self._mdb.models.insert_one(inst_doc)
             self._models[inst_iid] = pickle.loads(inst_doc['model_hart'])
             self._put_count[inst_iid] = 0
         model = self._models[inst_iid]
-        # TODO update this dummy data processing steps to detect edges, devices and
-        # update the "Live" collection.
+        # Process the data
         model.data = data
         model.detect_edges()
-        # Add NILM steps
-        step = data.shape[0]
-        # This whole conditional block is not needed. It should be replaced with an update
-        # of the "Live" collection at MongoDB.
-        if model.online_edge_detected and not model.on_transition:
-            before = np.array([self._prev] * (step // 2))
-            after = np.array([self._prev + model.online_edge[0]] * (step - step // 2))
-            est_y = np.concatenate((before, after))
-        elif model.on_transition:
-            est_y = np.array([self._prev] * step)
-        else:
-            est_y = np.array([model.running_avg_power[0]] * step)
-            self._prev = model.running_avg_power[0]
+        model._match_edges_hart()
+        model._update_live()
+        model._match_edges_hart_live()
         # Store data if needed, and prepare response.
         self._put_count[inst_iid] += 1
         if (self._put_count[inst_iid] % self.STORE_PERIOD == 0):
@@ -88,13 +92,14 @@ class NILM(object):
             self._mdb.models.update_one({'meterId': inst_iid},
                                         {'$set':
                                          {'meterId': inst_iid,
-                                          'lastUpdate': str(datetime.datetime.now()),
+                                          'lastUpdate': str(dt.datetime.now()),
                                           'model_hart': modelstr
                                           }
                                          })
-        resp.body = '{ "edge_detected": %s, "edge_size": [%f, %f], "est_y": %s }' % \
-                    (str(model.online_edge_detected).lower(),
-                     model.online_edge[0],
-                     model.online_edge[1],
-                     np.array2string(est_y, separator=', '))
+        # resp.body = 'OK'
+        lret = data.shape[0]
+        print(model._yest[-lret:])
+        resp.body = '{ "y_est": %s, "y_match": %s }' % \
+                    (str(model._yest[-lret:].tolist()),
+                     str(model._ymatch[-lret:].tolist()))
         resp.status = falcon.HTTP_200  # Default status

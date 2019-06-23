@@ -17,7 +17,8 @@ class Hart85eeris():
     BUFFER_SIZE_SECONDS = 60
     MAX_WINDOW_DAYS = 100
     MAX_NUM_STATES = 1000
-    MAX_DISPLAY_SECONDS = 10 * 3600
+    # MAX_DISPLAY_SECONDS = 10 * 3600
+    MAX_DISPLAY_SECONDS = 600
     # These could be parameters
     STEADY_THRESHOLD = 15
     SIGNIFICANT_EDGE = 40
@@ -289,7 +290,8 @@ class Hart85eeris():
 
     def _match_edges_hart_live(self):
         """
-        Version of Hart's edge matching algorithm to support the "live" display of eeRIS.
+        Adaptation of Hart's edge matching algorithm to support the "live" display of
+        eeRIS.
         """
         if not self.online_edge_detected:
             if self.live.empty:
