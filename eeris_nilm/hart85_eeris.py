@@ -20,7 +20,7 @@ class Hart85eeris():
     MAX_DISPLAY_SECONDS = 10 * 3600
     # These could be parameters
     STEADY_THRESHOLD = 15
-    SIGNIFICANT_EDGE = 70
+    SIGNIFICANT_EDGE = 40
     STEADY_SAMPLES_NUM = 5
     MATCH_THRESHOLD = 35
 
@@ -226,9 +226,11 @@ class Hart85eeris():
         """
         Clean-up edges buffer. This removes matched edges from the buffer, but may also
         remove edges that have remained in the buffer for a very long time, perform other
-        sanity checks etc. For now it is very simple, but is to be improved/updated.
+        sanity checks etc. It's currently work in progress.
         """
         self._edges.drop(self._edges.loc[self._edges['mark']].index, inplace=True)
+        # TODO:
+        # Sanity check 1: Matched power should be lower than consumed power
 
     def _match_edges_hart(self):
         """
@@ -267,11 +269,13 @@ class Hart85eeris():
                 e2 = e.iloc[j][['active', 'reactive']].values.astype(np.float64)
                 # if all(np.fabs(e1 + e2) < T):
                 # For now, using only active power
+                # TODO: Improve using reactive with rules
                 if np.fabs(e1[0] + e2[0]) < T[0]:
                     # Match
                     edge = (np.fabs(e1) + np.fabs(e2)) / 2.0
+                    # Ideally we should keep both start and end times for each edge
                     df = pd.DataFrame({'start': e.iloc[i]['start'],
-                                       'end': e.iloc[j]['end'],
+                                       'end': e.iloc[j]['start'],
                                        'active': edge[0],
                                        'reactive': edge[1]}, index=[0])
                     self._matches = self._matches.append(df, ignore_index=True)
@@ -280,6 +284,7 @@ class Hart85eeris():
                     e.iat[i, c] = True
                     e.iat[j, c] = True
                     break
+        # Perform sanity checks and clean edges.
         self._clean_edges_buffer()
 
     def _match_edges_hart_live(self):

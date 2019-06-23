@@ -10,9 +10,12 @@ Proprietary and confidential
 """
 
 # Demo of edge detection without REST service implementation
+import os
+import sys
 import matplotlib.pyplot as plt
 import matplotlib.animation as animation
 from matplotlib.table import table
+from matplotlib.font_manager import FontProperties
 import eco
 from eeris_nilm.hart85_eeris import Hart85eeris
 
@@ -20,13 +23,10 @@ from eeris_nilm.hart85_eeris import Hart85eeris
 class Demo(object):
     TIME_WINDOW = 1200
 
-    def __init__(self, ax, axt):
+    def __init__(self, path, date_start, date_end, ax, axt):
         # Load data
-        p = 'tests/data/01_sm_csv/01'
-        self.date_start = '2012-06-19T11:40'
-        self.date_end = '2012-06-19T23:59'
         self.step = 5
-        self.phase_list, self.power = eco.read_eco(p, self.date_start, self.date_end)
+        self.phase_list, self.power = eco.read_eco(path, date_start, date_end)
         self.xdata, self.ydata, self.ydata_r = [], [], []
         self.ymatch = None
 
@@ -36,6 +36,7 @@ class Demo(object):
         self.prev = self.power['active'].iloc[0]
 
         # Plot parameters
+        self.pause = False
         self.ax = ax
         self.line_active, = ax.plot([], [], 'b')
         self.line_reactive, = ax.plot([], [], 'c')
@@ -50,6 +51,9 @@ class Demo(object):
         self.axt = axt
         self.axt.set_axis_off()
 
+    # def on_click(self, event):
+    #     self.pause ^= True
+
     def init(self):
         self.line_active.set_data([], [])
         self.line_reactive.set_data([], [])
@@ -58,12 +62,11 @@ class Demo(object):
 
     def data_gen(self):
         lim = self.power.shape[0] - self.power.shape[0] % self.step
-        for i in range(0, lim, self.step):
-            # DEBUG
-            # print("Seconds %d to %d\n" % (self.current_sec, self.current_sec +
-            # self.step))
+        i = 0
+        while i < lim:
             data = self.power.iloc[i:i+self.step]
-            yield i, data
+            i += self.step
+            yield i - self.step, data
 
     def __call__(self, data):
         t, y = data
@@ -98,7 +101,10 @@ class Demo(object):
             cell_text = [self.model.live.iloc[i][['name', 'active', 'reactive']].tolist()
                          for i in range(self.model.live.shape[0])]
         tab = table(self.axt, cell_text, colLabels=['Appliance', 'Active', 'Reactive'],
-                    loc='center', rowLoc='center', colLoc='left', edges='horizontal')
+                    cellLoc='left', colLoc='left', edges='horizontal')
+        for (row, col), cell in tab.get_celld().items():
+            if (row == 0) or (col == -1):
+                cell.set_text_props(fontproperties=FontProperties(weight='bold'))
         self.axt.clear()
         self.axt.add_table(tab)
         self.axt.set_axis_off()
@@ -108,10 +114,23 @@ class Demo(object):
         return self.line_active, self.line_reactive, self.line_est, self.line_match
 
 
-fig = plt.figure()
+# Setup
+# p = '/media/data/datasets/NILM/ECO/02_sm_csv/02'
+p = 'tests/data/01_sm_csv/01'
+date_start = '2012-06-10T19:00'
+date_end = '2012-06-10T23:59'
+fig = plt.figure(figsize=(19.2, 10.8), dpi=100)
 ax = plt.subplot(2, 1, 1)
 axt = plt.subplot(2, 1, 2)
-d = Demo(ax, axt)
-ani = animation.FuncAnimation(fig, d, frames=d.data_gen, init_func=d.init, interval=0,
-                              fargs=None, blit=False, repeat=False)
-plt.show()
+# Setup movie writers
+# Writer = animation.writers['ffmpeg']
+# writer = Writer(fps=15, metadata=dict(artist='Me'), bitrate=1800)
+
+d = Demo(p, date_start, date_end, ax, axt)
+# TODO: Add pause functionality. Does not work yet.
+# fig.canvas.mpl_connect('button_press_event', d.on_click)
+ani = animation.FuncAnimation(fig, d, frames=d.data_gen, init_func=d.init, interval=50,
+                              fargs=None, blit=False, repeat=False,
+                              save_count=sys.maxsize)
+ani.save(os.path.basename(p) + '.mp4')
+# plt.show()
