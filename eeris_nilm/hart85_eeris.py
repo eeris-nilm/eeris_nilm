@@ -217,9 +217,20 @@ class Hart85eeris():
         self._last_processed_ts = self._buffer.index[-1]
         self._last_measurement = self._buffer.iloc[-1]
 
-    def _cluster(self):
+    def _static_cluster(self):
         """
-        Clustering step of the hart method.
+        Clustering step of Hart's method. Here it is implemented as a static clustering
+        step that runs periodically, mapping previous devices to the new device names.
+
+        NOT IMPLEMENTED
+        """
+        pass
+
+    def _dynamic_cluster(self):
+        """
+        Dynamic clustering step, as proposed by Hart.
+
+        NOT IMPLEMENTED
         """
         pass
 

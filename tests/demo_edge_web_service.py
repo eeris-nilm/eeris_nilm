@@ -25,11 +25,13 @@ step = 5
 plot_step = 600
 nilm_url = 'http://localhost:8000/nilm/1'
 inst_url = 'http://localhost:8000/installation/1/model'
+# nilm_url = 'http://clio.ee.auth.gr:9991/nilm/1'
+# inst_url = 'http://clio.ee.auth.gr:9991/installation/1/model'
 current_sec = 0
 
 # Prepare, by deleting possible existing models
-r = requests.delete(inst_url)
-print('Result of model delete: %s' % (r.text))
+# r = requests.delete(inst_url)
+# print('Result of model delete: %s' % (r.text))
 
 # Prepare data and plots
 phase_list, power = eco.read_eco(p, date_start, date_end)
