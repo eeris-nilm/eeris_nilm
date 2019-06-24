@@ -84,6 +84,7 @@ class Hart85eeris():
         if self._buffer is None:
             self._buffer = tmp_data.copy()
         else:
+            # Data concerning past dates update the buffer
             self._buffer = self._buffer.append(tmp_data)  # More effective alternatives?
             # Remove possible duplicate entries (keep the last entry), based on timestamp
             self._buffer = self._buffer.loc[~self._buffer.index.duplicated(keep='last')]
@@ -103,7 +104,6 @@ class Hart85eeris():
         else:
             self._idx = self._last_processed_ts + 1 * self._buffer.index.freq
             self._data = self._buffer.loc[self._idx:]
-
         # TODO: Handle N/As and zero voltage.
         # TODO: Unit tests with all the unusual cases
 
@@ -123,14 +123,14 @@ class Hart85eeris():
                                                             r_data['voltage']), 2.5)
         return r_data
 
-    def detect_edges(self):
+    def _detect_edges(self):
         """
         TODO: Advanced identification of steady states and transitions based on active and
         reactive power.
         """
         pass
 
-    def detect_edges_hart(self):
+    def _detect_edges_hart(self):
         """
         Simplified edge detector, based on Hart's algorithm.
         """
@@ -396,3 +396,12 @@ class Hart85eeris():
         Guess the appliance type using an unnamed hart model
         """
         pass
+
+    def update(self):
+        """
+        Wrapper to sequence of operations for model update
+        """
+        self._detect_edges_hart()
+        self._match_edges_hart()
+        self._update_live()
+        self._match_edges_hart_live()

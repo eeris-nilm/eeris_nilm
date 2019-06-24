@@ -71,10 +71,7 @@ class Demo(object):
     def __call__(self, data):
         t, y = data
         self.model.data = y
-        self.model.detect_edges_hart()
-        self.model._match_edges_hart()
-        self.model._update_live()
-        self.model._match_edges_hart_live()
+        self.update()
         self.current_sec += self.step
         # Update lines
         self.xdata.extend(list(range(t, t + self.step)))
@@ -132,5 +129,5 @@ d = Demo(p, date_start, date_end, ax, axt)
 ani = animation.FuncAnimation(fig, d, frames=d.data_gen, init_func=d.init, interval=50,
                               fargs=None, blit=False, repeat=False,
                               save_count=sys.maxsize)
-ani.save(os.path.basename(p) + '.mp4')
-# plt.show()
+# ani.save(os.path.basename(p) + '.mp4')
+plt.show()

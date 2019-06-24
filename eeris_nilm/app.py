@@ -11,6 +11,7 @@ import falcon
 import pymongo
 
 from .nilm import NILM
+from .installation_manager import InstallationManager
 
 
 def create_app(dburl, dbname):
@@ -26,7 +27,9 @@ def create_app(dburl, dbname):
     # Gunicorn expects the 'application' name
     api = falcon.API()
     api.add_route('/nilm/{inst_id}', NILM(mdb))
-
+    api.add_route('/installation/{inst_id}/model',
+                  InstallationManager(mdb),
+                  suffix='model')
     return api
 
 

@@ -9,6 +9,8 @@ Unauthorized copying of this file, via any medium is strictly prohibited
 Proprietary and confidential
 """
 
+# !!! NOT MAINTAINED !!! DELETE
+
 # Demo of edge detection without REST service implementation
 import numpy as np
 import matplotlib.pyplot as plt

@@ -33,7 +33,7 @@ for i in range(0, power.shape[0] // 2, plot_step):
         # print("Seconds %d to %d\n" % (current_sec, current_sec + step - 1))
         data = power.iloc[j:j + step]
         model.data = data
-        model.detect_edges_hart()
+        model._detect_edges_hart()
         model._match_edges_hart()
         if model.online_edge_detected and not model.on_transition:
             est_y.append(np.array([prev] * (step // 2)))

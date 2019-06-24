@@ -7,7 +7,6 @@ Proprietary and confidential
 """
 
 import falcon
-import numpy as np
 import pandas as pd
 import datetime as dt
 import pickle
@@ -15,6 +14,7 @@ import pickle
 from .hart85_eeris import Hart85eeris
 
 
+# TODO: Update API and responses
 class NILM(object):
     """
     Class to handle streamed data processing for NILM in eeRIS. It also maintains a
@@ -31,6 +31,26 @@ class NILM(object):
         self._put_count = dict()
         self._prev = 0.0
 
+    def _prepare_response_body(self, model, lret=5):
+        """
+        Helper function to prepare response body. lret is the length of the returned _yest
+        array (used for development/debugging, ignore it in production).
+        """
+        live = model.live[['name', 'active', 'reactive']].to_json()
+        ts = dt.datetime.now().strftime('%Y-%m-%dT%H:%M%z')
+        body = '''{
+        "timestamp": "%s",
+        "appliances": %s,
+        "edge_detected": %s,
+        "edge_size": [%.2f, %.2f],
+        "_yest": %s }''' % (ts,
+                            live,
+                            str(model.online_edge_detected).lower(),
+                            model.online_edge[0],
+                            model.online_edge[1],
+                            model._yest[-lret:].tolist())
+        return body
+
     def on_get(self, req, resp, inst_id):
         """
         On get, the service returns a document describing the status of a specific
@@ -45,11 +65,9 @@ class NILM(object):
                                             "You have requested data from " +
                                             "an installation that does not exist")
             else:
-                self._models[inst_iid] = pickle.loads(inst_doc['model_hart'])
+                self._models[inst_iid] = pickle.loads(inst_doc['modelHart'])
         model = self._models[inst_iid]
-        live = model.live[['name', 'active', 'reactive']].to_json()
-        ts = dt.datetime.now().strftime('%Y-%m-%dT%H:%M%z')
-        resp.body = '{ timestamp: %s, appliances: %s }' % (ts, live)
+        resp.body = self._prepare_response_body(model)
         resp.status = falcon.HTTP_200
 
     def on_put(self, req, resp, inst_id):
@@ -73,17 +91,15 @@ class NILM(object):
                 modelstr = pickle.dumps(Hart85eeris(installation_id=inst_iid))
                 inst_doc = {'meterId': inst_iid,
                             'lastUpdate': dt.datetime.now().strftime('%Y-%m-%dT%H:%M%z'),
-                            'model_hart': modelstr}
+                            'debugInstallation': True,
+                            'modelHart': modelstr}
                 self._mdb.models.insert_one(inst_doc)
-            self._models[inst_iid] = pickle.loads(inst_doc['model_hart'])
+            self._models[inst_iid] = pickle.loads(inst_doc['modelHart'])
             self._put_count[inst_iid] = 0
         model = self._models[inst_iid]
         # Process the data
         model.data = data
-        model.detect_edges()
-        model._match_edges_hart()
-        model._update_live()
-        model._match_edges_hart_live()
+        model.update()
         # Store data if needed, and prepare response.
         self._put_count[inst_iid] += 1
         if (self._put_count[inst_iid] % self.STORE_PERIOD == 0):
@@ -93,13 +109,11 @@ class NILM(object):
                                         {'$set':
                                          {'meterId': inst_iid,
                                           'lastUpdate': str(dt.datetime.now()),
-                                          'model_hart': modelstr
+                                          'debugInstallation': True,
+                                          'modelHart': modelstr
                                           }
                                          })
         # resp.body = 'OK'
         lret = data.shape[0]
-        print(model._yest[-lret:])
-        resp.body = '{ "y_est": %s, "y_match": %s }' % \
-                    (str(model._yest[-lret:].tolist()),
-                     str(model._ymatch[-lret:].tolist()))
+        resp.body = self._prepare_response_body(model, lret=lret)
         resp.status = falcon.HTTP_200  # Default status
