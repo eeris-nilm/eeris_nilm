@@ -23,10 +23,10 @@ date_start = '2012-06-10T19:00'
 date_end = '2012-06-10T23:59'
 step = 5
 plot_step = 600
-nilm_url = 'http://localhost:8000/nilm/1'
-inst_url = 'http://localhost:8000/installation/1/model'
-# nilm_url = 'http://clio.ee.auth.gr:9991/nilm/1'
-# inst_url = 'http://clio.ee.auth.gr:9991/installation/1/model'
+# nilm_url = 'http://localhost:8000/nilm/1'
+# inst_url = 'http://localhost:8000/installation/1/model'
+nilm_url = 'http://clio.ee.auth.gr:9991/nilm/1'
+inst_url = 'http://clio.ee.auth.gr:9991/installation/1/model'
 current_sec = 0
 
 # Prepare, by deleting possible existing models

@@ -10,7 +10,6 @@ Proprietary and confidential
 """
 
 # Demo of edge detection without REST service implementation
-import os
 import sys
 import matplotlib.pyplot as plt
 import matplotlib.animation as animation
@@ -71,7 +70,7 @@ class Demo(object):
     def __call__(self, data):
         t, y = data
         self.model.data = y
-        self.update()
+        self.model.update()
         self.current_sec += self.step
         # Update lines
         self.xdata.extend(list(range(t, t + self.step)))
