@@ -14,7 +14,7 @@ class Hart85eeris():
     """ Modified implementation of Hart's NILM algorithm. """
     # NOMINAL_VOLTAGE = 230.0
     NOMINAL_VOLTAGE = 240.0  # Just a test
-    BUFFER_SIZE_SECONDS = 60
+    BUFFER_SIZE_SECONDS = 600
     MAX_WINDOW_DAYS = 100
     MAX_NUM_STATES = 1000
     MAX_DISPLAY_SECONDS = 10 * 3600
@@ -80,19 +80,19 @@ class Hart85eeris():
         if duration > self.MAX_WINDOW_DAYS:
             # Do not process the window, it's too long.
             raise ValueError('Data duration too long')
-        # Round timestamps
-        data.index = data.index.round('1s')
-        tmp_data = self._normalise(data)
+        # Normalize power measurements with voltage
+        data = self._normalise(data)
         if self._buffer is None:
-            self._buffer = tmp_data.copy()
+            self._buffer = data.copy()
         else:
             # Data concerning past dates update the buffer
-            self._buffer = self._buffer.append(tmp_data)  # More effective alternatives?
-            # Remove possible duplicate entries (keep the last entry), based on timestamp
-            self._buffer = self._buffer.loc[~self._buffer.index.duplicated(keep='last')]
-            self._buffer = self._buffer.sort_index()
-            # Bug up to pandas 0.24, loses freq.
-            self._buffer.index.freq = self._buffer.index.inferred_freq
+            self._buffer = self._buffer.append(data)  # More effective alternatives?
+        # Round timestamps
+        self._buffer.index = self._buffer.index.round('1s')
+        # Resample to 1s
+        self._buffer = self._buffer.asfreq('1S', method='pad')
+        # Remove possible duplicate entries (keep the last entry), based on timestamp
+        self._buffer = self._buffer.loc[~self._buffer.index.duplicated(keep='last')]
         # Keep only the last BUFFER_SIZE_SECONDS of the buffer
         start_ts = self._buffer.index[-1] - \
             pd.offsets.Second(self.BUFFER_SIZE_SECONDS - 1)
@@ -101,8 +101,6 @@ class Hart85eeris():
             self._data = self._buffer
             self._idx = self._buffer.index[0]
             self._steady_start_ts = self._idx
-            # self._previous_steady_power = self._data.iloc[0]
-            # self._est_prev = self._data['active'].iloc[0]
         else:
             self._idx = self._last_processed_ts + 1 * self._buffer.index.freq
             self._data = self._buffer.loc[self._idx:]
@@ -114,17 +112,14 @@ class Hart85eeris():
         Resample data to 1s and normalise power with voltage measurements. Drop missing
         values.
         """
-        # Set to 1s sampling rate.
-        df_idx = pd.date_range(start=data.index[0], end=data.index[-1], freq='S')
-        r_data = data.reindex(index=df_idx, copy=True)
-        # TODO: Update this for multiple missing values.
-        r_data.fillna(method='backfill', inplace=True)
         # Normalisation. Raise active power to 1.5 and reactive power to 2.5. See Hart's
         # 1985 paper for an explanation.
-        r_data['active'] = r_data['active'] * np.power((self.NOMINAL_VOLTAGE /
-                                                        r_data['voltage']), 1.5)
-        r_data['reactive'] = r_data['reactive'] * np.power((self.NOMINAL_VOLTAGE /
-                                                            r_data['voltage']), 2.5)
+        # Just making sure...
+        r_data = data.copy()
+        r_data.loc[:, 'active'] = data['active'] * \
+            np.power((self.NOMINAL_VOLTAGE / data['voltage']), 1.5)
+        r_data.loc[:, 'reactive'] = data['reactive'] * \
+            np.power((self.NOMINAL_VOLTAGE / data['voltage']), 2.5)
         return r_data
 
     def _detect_edges(self):
@@ -317,7 +312,7 @@ class Hart85eeris():
                 return
             # Update last edge
             last = self.live.index[-1]
-            if not self.live.loc[last]['final']:
+            if not self.live.loc[last, 'final']:
                 self.live.at[last, 'active'] = \
                     self.running_avg_power[0] - self._previous_steady_power[0]
                 self.live.at[last, 'reactive'] = \
