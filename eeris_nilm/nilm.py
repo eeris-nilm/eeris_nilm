@@ -37,7 +37,7 @@ class NILM(object):
         array (used for development/debugging, ignore it in production).
         """
         live = model.live[['name', 'active', 'reactive']].to_json()
-        ts = dt.datetime.now().strftime('%Y-%m-%dT%H:%M%z')
+        ts = dt.datetime.now().strftime('%Y-%m-%dT%H:%M:%S%z')
         body = '''{
         "timestamp": "%s",
         "appliances": %s,
@@ -90,7 +90,8 @@ class NILM(object):
             if inst_doc is None:
                 modelstr = pickle.dumps(Hart85eeris(installation_id=inst_iid))
                 inst_doc = {'meterId': inst_iid,
-                            'lastUpdate': dt.datetime.now().strftime('%Y-%m-%dT%H:%M%z'),
+                            'lastUpdate':
+                            dt.datetime.now().strftime('%Y-%m-%dT%H:%M:%S%z'),
                             'debugInstallation': True,
                             'modelHart': modelstr}
                 self._mdb.models.insert_one(inst_doc)
