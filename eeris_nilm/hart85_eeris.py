@@ -20,7 +20,7 @@ class Hart85eeris():
     MAX_DISPLAY_SECONDS = 10 * 3600
     # These could be parameters
     STEADY_THRESHOLD = 15
-    SIGNIFICANT_EDGE = 40
+    SIGNIFICANT_EDGE = 50
     STEADY_SAMPLES_NUM = 5
     MATCH_THRESHOLD = 35
 
@@ -89,10 +89,10 @@ class Hart85eeris():
             self._buffer = self._buffer.append(data)  # More effective alternatives?
         # Round timestamps
         self._buffer.index = self._buffer.index.round('1s')
-        # Resample to 1s
-        self._buffer = self._buffer.asfreq('1S', method='pad')
         # Remove possible duplicate entries (keep the last entry), based on timestamp
         self._buffer = self._buffer.loc[~self._buffer.index.duplicated(keep='last')]
+        # Resample to 1s
+        self._buffer = self._buffer.asfreq('1S', method='pad')
         # Keep only the last BUFFER_SIZE_SECONDS of the buffer
         start_ts = self._buffer.index[-1] - \
             pd.offsets.Second(self.BUFFER_SIZE_SECONDS - 1)
@@ -334,7 +334,7 @@ class Hart85eeris():
                                'previous_reactive': self._previous_steady_power[1],
                                'final': False},
                               index=[0])
-            self.live = self.live.append(df, ignore_index=True, sort=True)
+            self.live = pd.concat([df, self.live], ignore_index=True, sort=True)
             self._appliance_id += 1
             return
         # Appliance cycle stop. Does it match against previous edges?

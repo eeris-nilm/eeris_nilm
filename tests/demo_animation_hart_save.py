@@ -114,41 +114,45 @@ class Demo(object):
 # p = '/media/data/datasets/NILM/ECO/02_sm_csv/02'
 p = 'tests/data/01_sm_csv/01'
 
-# For saving one file per day
-date_start = '2012-06-19'
-date_end = '2012-07-26'
-date_list = pd.date_range(start=date_start, end=date_end, freq='D')
-for date in date_list:
-    d_start = date.strftime('%Y-%m-%dT%H:%M')
-    d_end = (date + 1 * date.freq - pd.Timedelta(1, 'm')).strftime('%Y-%m-%dT%H:%M')
-    fig = plt.figure(figsize=(19.2, 10.8), dpi=100)
-    ax = plt.subplot(2, 1, 1)
-    axt = plt.subplot(2, 1, 2)
-    # Setup movie writers
-    # Writer = animation.writers['ffmpeg']
-    # writer = Writer(fps=15, metadata=dict(artist='Me'), bitrate=1800)
+# # For saving one file per day
+# date_start = '2012-06-19'
+# date_end = '2012-07-26'
+# date_list = pd.date_range(start=date_start, end=date_end, freq='D')
+# for date in date_list:
+#     d_start = date.strftime('%Y-%m-%dT%H:%M')
+#     d_end = (date + 1 * date.freq - pd.Timedelta(1, 'm')).strftime('%Y-%m-%dT%H:%M')
+#     fig = plt.figure(figsize=(19.2, 10.8), dpi=100)
+#     ax = plt.subplot(2, 1, 1)
+#     axt = plt.subplot(2, 1, 2)
+#     # Setup movie writers
+#     # Writer = animation.writers['ffmpeg']
+#     # writer = Writer(fps=15, metadata=dict(artist='Me'), bitrate=1800)
 
-    d = Demo(p, d_start, d_end, ax, axt)
-    # TODO: Add pause functionality. Does not work yet.
-    # fig.canvas.mpl_connect('button_press_event', d.on_click)
-    ani = animation.FuncAnimation(fig, d, frames=d.data_gen,
-                                  init_func=d.init, interval=50,
-                                  fargs=None, blit=False, repeat=False,
-                                  save_count=sys.maxsize)
-    day = date.strftime('%Y%m%d')
-    ani.save('%s_%s.mp4' % (os.path.basename(p), day))
-    # plt.show()
+#     d = Demo(p, d_start, d_end, ax, axt)
+#     # TODO: Add pause functionality. Does not work yet.
+#     # fig.canvas.mpl_connect('button_press_event', d.on_click)
+#     ani = animation.FuncAnimation(fig, d, frames=d.data_gen,
+#                                   init_func=d.init, interval=50,
+#                                   fargs=None, blit=False, repeat=False,
+#                                   save_count=sys.maxsize)
+#     day = date.strftime('%Y%m%d')
+#     ani.save('%s_%s.mp4' % (os.path.basename(p), day))
+#     # plt.show()
 
 
-# # For saving a single file for all days
-# date_start = '2012-06-01T00:00'
-# date_end = '2012-06-10T23:59'
-# fig = plt.figure(figsize=(19.2, 10.8), dpi=100)
-# ax = plt.subplot(2, 1, 1)
-# axt = plt.subplot(2, 1, 2)
-# d = Demo(p, date_start, date_end, ax, axt)
-# ani = animation.FuncAnimation(fig, d, frames=d.data_gen,
-#                               init_func=d.init, interval=50,
-#                               fargs=None, blit=False, repeat=False,
-#                               save_count=sys.maxsize)
-# ani.save('%s_%s_to_%s.mp4' % (os.path.basename(p), date_start, date_end))
+# For saving a single day. Supports command line arguments.
+if len(sys.argv) > 1:
+    day = sys.argv[1]
+else:
+    day = '2012-06-01'
+date_start = day + 'T00:00'
+date_end = day + 'T23:59'
+fig = plt.figure(figsize=(19.2, 10.8), dpi=100)
+ax = plt.subplot(2, 1, 1)
+axt = plt.subplot(2, 1, 2)
+d = Demo(p, date_start, date_end, ax, axt)
+ani = animation.FuncAnimation(fig, d, frames=d.data_gen,
+                              init_func=d.init, interval=50,
+                              fargs=None, blit=False, repeat=False,
+                              save_count=sys.maxsize)
+ani.save('%s_%s.mp4' % (os.path.basename(p), day))
