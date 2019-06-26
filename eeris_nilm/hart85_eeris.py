@@ -82,8 +82,6 @@ class Hart85eeris():
             raise ValueError('Data duration too long')
         # Round timestamps
         data.index = data.index.round('1s')
-        # TODO: Update this for multiple missing values.
-        data.fillna(method='backfill', inplace=True)
         tmp_data = self._normalise(data)
         if self._buffer is None:
             self._buffer = tmp_data.copy()
@@ -119,6 +117,8 @@ class Hart85eeris():
         # Set to 1s sampling rate.
         df_idx = pd.date_range(start=data.index[0], end=data.index[-1], freq='S')
         r_data = data.reindex(index=df_idx, copy=True)
+        # TODO: Update this for multiple missing values.
+        r_data.fillna(method='backfill', inplace=True)
         # Normalisation. Raise active power to 1.5 and reactive power to 2.5. See Hart's
         # 1985 paper for an explanation.
         r_data['active'] = r_data['active'] * np.power((self.NOMINAL_VOLTAGE /
