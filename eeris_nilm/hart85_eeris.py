@@ -82,6 +82,8 @@ class Hart85eeris():
             raise ValueError('Data duration too long')
         # Round timestamps
         data.index = data.index.round('1s')
+        # TODO: Update this for multiple missing values.
+        data.fillna(method='backfill', inplace=True)
         tmp_data = self._normalise(data)
         if self._buffer is None:
             self._buffer = tmp_data.copy()
