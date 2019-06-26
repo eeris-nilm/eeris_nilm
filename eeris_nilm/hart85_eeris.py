@@ -17,8 +17,7 @@ class Hart85eeris():
     BUFFER_SIZE_SECONDS = 60
     MAX_WINDOW_DAYS = 100
     MAX_NUM_STATES = 1000
-    # MAX_DISPLAY_SECONDS = 10 * 3600
-    MAX_DISPLAY_SECONDS = 600
+    MAX_DISPLAY_SECONDS = 10 * 3600
     # These could be parameters
     STEADY_THRESHOLD = 15
     SIGNIFICANT_EDGE = 40
@@ -71,7 +70,8 @@ class Hart85eeris():
     def data(self, data):
         """
         Setter for data variable. It also pre-processes the data and updates
-        a sliding window of BUFFER_SIZE_SECONDS of data.
+        a sliding window of BUFFER_SIZE_SECONDS of data. Current version assumes 1Hz
+        sampling frequency.
         """
         if data.shape[0] == 0:
             raise ValueError('Empty dataframe')
@@ -80,6 +80,8 @@ class Hart85eeris():
         if duration > self.MAX_WINDOW_DAYS:
             # Do not process the window, it's too long.
             raise ValueError('Data duration too long')
+        # Round timestamps
+        data.index = data.index.round('1s')
         tmp_data = self._normalise(data)
         if self._buffer is None:
             self._buffer = tmp_data.copy()
@@ -290,7 +292,7 @@ class Hart85eeris():
                                        'end': e.iloc[j]['start'],
                                        'active': edge[0],
                                        'reactive': edge[1]}, index=[0])
-                    self._matches = self._matches.append(df, ignore_index=True)
+                    self._matches = self._matches.append(df, ignore_index=True, sort=True)
                     # Get the 'mark' column.
                     c = e.columns.get_loc('mark')
                     e.iat[i, c] = True
@@ -335,7 +337,7 @@ class Hart85eeris():
                                'previous_reactive': self._previous_steady_power[1],
                                'final': False},
                               index=[0])
-            self.live = self.live.append(df, ignore_index=True)
+            self.live = self.live.append(df, ignore_index=True, sort=True)
             self._appliance_id += 1
             return
         # Appliance cycle stop. Does it match against previous edges?
