@@ -90,10 +90,10 @@ class Hart85eeris():
         # Round timestamps
         self._buffer.index = self._buffer.index.round('1s')
         # Remove possible duplicate entries (keep the last entry), based on timestamp
-        self._buffer = self._buffer.loc[~self._buffer.index.duplicated(keep='last')]
-        # self._buffer = self._buffer.reset_index()
-        # self._buffer = self._buffer.drop_duplicates(subset='index', keep='last')
-        # self._buffer = self._buffer.set_index('index')
+        # self._buffer = self._buffer.loc[~self._buffer.index.duplicated(keep='last')]
+        self._buffer = self._buffer.reset_index()
+        self._buffer = self._buffer.drop_duplicates(subset='index', keep='last')
+        self._buffer = self._buffer.set_index('index')
         # Resample to 1s
         self._buffer = self._buffer.asfreq('1S', method='pad')
         # Keep only the last BUFFER_SIZE_SECONDS of the buffer
@@ -275,7 +275,7 @@ class Hart85eeris():
             else:
                 t_reactive = self.MATCH_THRESHOLD
             T = np.array([t_active, t_reactive])
-            for j in range(i+1, len(e)):
+            for j in range(i + 1, len(e)):
                 # Edge has been marked before or is positive
                 if e.iloc[j]['active'] >= 0 or e.iloc[j]['mark']:
                     continue
