@@ -23,15 +23,15 @@ date_start = '2012-06-10T19:00'
 date_end = '2012-06-10T23:59'
 step = 5
 plot_step = 600
-# nilm_url = 'http://localhost:8000/nilm/1'
-# inst_url = 'http://localhost:8000/installation/1/model'
-nilm_url = 'http://clio.ee.auth.gr:9991/nilm/1'
-inst_url = 'http://clio.ee.auth.gr:9991/installation/1/model'
+nilm_url = 'http://localhost:8000/nilm/1'
+inst_url = 'http://localhost:8000/installation/1/model'
+# nilm_url = 'http://clio.ee.auth.gr:9991/nilm/1'
+# inst_url = 'http://clio.ee.auth.gr:9991/installation/1/model'
 current_sec = 0
 
 # Prepare, by deleting possible existing models
-# r = requests.delete(inst_url)
-# print('Result of model delete: %s' % (r.text))
+r = requests.delete(inst_url)
+print('Result of model delete: %s' % (r.text))
 
 # Prepare data and plots
 phase_list, power = eco.read_eco(p, date_start, date_end)
@@ -60,7 +60,7 @@ for i in range(0, power.shape[0], step):
         yest = yest[-plot_step:]
         ax.clear()
         plt.grid()
-        d = power.iloc[i-plot_step+step:i+step]
+        d = power.iloc[i - plot_step + step:i + step]
         plt.plot(d.index, d['active'].values, 'b')
         plt.plot(d.index, yest, 'r')
         fig.autofmt_xdate()
