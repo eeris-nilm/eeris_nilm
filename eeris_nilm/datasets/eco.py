@@ -31,13 +31,12 @@ def read_eco(path, date_start, date_end):
 
     Returns
     -------
-    data : Pandas dataframe with measurements including 'active', 'reactive', 'voltage,
-    'phase_angle', 'current'
-
+    data : Pandas dataframe with measurements including 'active', 'reactive',
+    'voltage, 'phase_angle', 'current'
     """
 
-    # d = datetime.date.fromisoformat(date_start)  # Only valid in python 3.7, dropped for
-    # now.
+    # d = datetime.date.fromisoformat(date_start)  # Only valid in python 3.7,
+    # dropped for now.
     d_start = datetime.datetime.strptime(date_start, '%Y-%m-%dT%H:%M')
     d = d_start
     start_day = datetime.datetime(d.year, d.month, d.day)
@@ -47,8 +46,8 @@ def read_eco(path, date_start, date_end):
         print('ECO: Loading building ' + os.path.basename(path) + ', time ' +
               d.strftime('%Y-%m-%dT%H:%M'))
         f = os.path.join(path, d.strftime('%Y-%m-%d') + '.csv')
-        df = pd.read_csv(f, header=None, index_col=False, names=[i for i in range(1, 17)],
-                         dtype=np.float32)
+        df = pd.read_csv(f, header=None, index_col=False,
+                         names=[i for i in range(1, 17)], dtype=np.float32)
         # From nilmtk ECO dataset converter
         phases = []
         for phase in range(1, 4):
@@ -76,10 +75,12 @@ def read_eco(path, date_start, date_end):
                 print('Removed missing measurements - Size before: ' +
                       str(tmp_before) + ', size after:' + str(tmp_after))
             phases.append(df_phase)
-            phase_df_list[phase - 1] = pd.concat([phase_df_list[phase - 1], df_phase])
+            phase_df_list[phase - 1] = \
+                pd.concat([phase_df_list[phase - 1], df_phase])
         d += datetime.timedelta(days=1)
     agg_df = pd.DataFrame([], columns=['active', 'reactive', 'voltage'])
-    agg_df['active'] = phase_df_list[0]['active'] + phase_df_list[1]['active'] + \
+    agg_df['active'] = phase_df_list[0]['active'] + \
+        phase_df_list[1]['active'] + \
         phase_df_list[2]['active']
     agg_df['reactive'] = phase_df_list[0]['reactive'] + \
         phase_df_list[1]['reactive'] + phase_df_list[2]['reactive']
@@ -87,7 +88,8 @@ def read_eco(path, date_start, date_end):
                          phase_df_list[1]['voltage'] +
                          phase_df_list[2]['voltage']) / 3.0
     for i in range(len(phase_df_list)):
-        phase_df_list[i] = phase_df_list[i].loc[(phase_df_list[i].index >= d_start) &
-                                                (phase_df_list[i].index <= d_end)]
+        phase_df_list[i] = \
+            phase_df_list[i].loc[(phase_df_list[i].index >= d_start) &
+                                 (phase_df_list[i].index <= d_end)]
     agg_df = agg_df.loc[(agg_df.index >= d_start) & (agg_df.index <= d_end)]
     return (phase_df_list, agg_df)

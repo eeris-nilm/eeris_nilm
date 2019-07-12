@@ -11,17 +11,17 @@ import pandas as pd
 import datetime as dt
 import pickle
 
-from .hart85_eeris import Hart85eeris
+from algorithms import hart
 
 
-# TODO: Update API and responses
 class NILM(object):
     """
-    Class to handle streamed data processing for NILM in eeRIS. It also maintains a
-    document of the state of appliances in an installation.
+    Class to handle streamed data processing for NILM in eeRIS. It also
+    maintains a document of the state of appliances in an installation.
     """
 
-    # How often (every n PUT requests) should we store the document persistently?
+    # How often (every n PUT requests) should we store the document
+    # persistently?
     STORE_PERIOD = 10
 
     def __init__(self, mdb):
@@ -33,8 +33,9 @@ class NILM(object):
 
     def _prepare_response_body(self, model, lret=5):
         """
-        Helper function to prepare response body. lret is the length of the returned _yest
-        array (used for development/debugging, ignore it in production).
+        Helper function to prepare response body. lret is the length of the
+        returned _yest array (used for development/debugging, ignore it in
+        production).
         """
         live = model.live[['name', 'active', 'reactive']].to_json()
         ts = dt.datetime.now().strftime('%Y-%m-%dT%H:%M:%S%z')
@@ -53,8 +54,8 @@ class NILM(object):
 
     def on_get(self, req, resp, inst_id):
         """
-        On get, the service returns a document describing the status of a specific
-        installation.
+        On get, the service returns a document describing the status of a
+        specific installation.
         """
         inst_iid = int(inst_id)
         # Load the model, if not loaded already
@@ -63,7 +64,8 @@ class NILM(object):
             if inst_doc is None:
                 raise falcon.HTTPBadRequest("Installation does not exist",
                                             "You have requested data from " +
-                                            "an installation that does not exist")
+                                            "an installation that does not" +
+                                            "exist")
             else:
                 self._models[inst_iid] = pickle.loads(inst_doc['modelHart'])
         model = self._models[inst_iid]
@@ -72,11 +74,12 @@ class NILM(object):
 
     def on_put(self, req, resp, inst_id):
         """
-        This method receives new measurements and processes them to update the state of
-        the installation. This is where most of the work is being done.
-
-        req.stream must contain a json serialized Pandas dataframe (with at least
-        timestamp as index, active, reactive power and voltage as columns).
+        This method receives new measurements and processes them to update the
+        state of the installation. This is where most of the work is being
+        done.
+        req.stream must contain a json serialized Pandas dataframe (with at
+        least timestamp as index, active, reactive power and voltage as
+        columns).
         """
         if req.content_length:
             data = pd.read_json(req.stream)
@@ -88,7 +91,8 @@ class NILM(object):
         if (inst_iid not in self._models.keys()):
             inst_doc = self._mdb.models.find_one({"meterId": inst_iid})
             if inst_doc is None:
-                modelstr = pickle.dumps(Hart85eeris(installation_id=inst_iid))
+                modelstr = pickle.dumps(
+                    hart.Hart85eeris(installation_id=inst_iid))
                 inst_doc = {'meterId': inst_iid,
                             'lastUpdate':
                             dt.datetime.now().strftime('%Y-%m-%dT%H:%M:%S%z'),

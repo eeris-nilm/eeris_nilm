@@ -15,7 +15,7 @@ import matplotlib.pyplot as plt
 import matplotlib.animation as animation
 from matplotlib.table import table
 from matplotlib.font_manager import FontProperties
-import eco
+from eeris_nilm.datasets import eco
 from eeris_nilm.hart85_eeris import Hart85eeris
 
 

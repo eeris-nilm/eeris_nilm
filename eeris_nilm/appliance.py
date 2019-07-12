@@ -11,8 +11,9 @@ import pandas as pd
 
 
 class Appliance():
-    """ Unsupervised appliance model. Includes signatures, usage statistics and other data
-    useful for identification through NILM. Work in progress.
+    """
+    Unsupervised appliance model. Includes signatures, usage statistics and
+    other data useful for identification through NILM. Work in progress.
     """
 
     def __init__(self, appliance_id):

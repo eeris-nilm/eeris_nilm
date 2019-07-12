@@ -15,8 +15,7 @@ import numpy as np
 import requests
 import json
 import matplotlib.pyplot as plt
-# from tests import eco
-import eco
+from eeris_nilm.datasets import eco
 
 p = 'tests/data/01_sm_csv/01'
 date_start = '2012-06-10T19:00'

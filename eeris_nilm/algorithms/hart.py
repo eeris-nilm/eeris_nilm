@@ -12,8 +12,7 @@ import pandas as pd
 
 class Hart85eeris():
     """ Modified implementation of Hart's NILM algorithm. """
-    # NOMINAL_VOLTAGE = 230.0
-    NOMINAL_VOLTAGE = 240.0  # Just a test
+    NOMINAL_VOLTAGE = 230.0
     BUFFER_SIZE_SECONDS = 600
     MAX_WINDOW_DAYS = 100
     MAX_NUM_STATES = 1000
@@ -48,10 +47,12 @@ class Hart85eeris():
         # self.steady_states = np.array([], dtype=np.float64).reshape(0, 2)
         # self.edges = np.array([], dtype=np.float64).reshape(0, 2)
         self._steady_states = pd.DataFrame([],
-                                           columns=['start', 'end', 'active', 'reactive'])
+                                           columns=['start', 'end', 'active',
+                                                    'reactive'])
         self._edges = pd.DataFrame([], columns=['start', 'end', 'active',
                                                 'reactive', 'mark'])
-        self._matches = pd.DataFrame([], columns=['start', 'end', 'active', 'reactive'])
+        self._matches = pd.DataFrame([], columns=['start', 'end', 'active',
+                                                  'reactive'])
         self._edge_start_ts = None
         self._edge_end_ts = None
         self._steady_start_ts = None
@@ -70,8 +71,8 @@ class Hart85eeris():
     def data(self, data):
         """
         Setter for data variable. It also pre-processes the data and updates
-        a sliding window of BUFFER_SIZE_SECONDS of data. Current version assumes 1Hz
-        sampling frequency.
+        a sliding window of BUFFER_SIZE_SECONDS of data. Current version assumes
+        1Hz sampling frequency.
         """
         if data.shape[0] == 0:
             raise ValueError('Empty dataframe')
@@ -86,11 +87,14 @@ class Hart85eeris():
             self._buffer = data.copy()
         else:
             # Data concerning past dates update the buffer
-            self._buffer = self._buffer.append(data)  # More effective alternatives?
+            self._buffer = self._buffer.append(data)  # More effective
+            # alternatives?
         # Round timestamps
         self._buffer.index = self._buffer.index.round('1s')
-        # Remove possible duplicate entries (keep the last entry), based on timestamp
-        # self._buffer = self._buffer.loc[~self._buffer.index.duplicated(keep='last')]
+        # Remove possible duplicate entries (keep the last entry), based on
+        # timestamp
+        # self._buffer =
+        # self._buffer.loc[~self._buffer.index.duplicated(keep='last')]
         self._buffer = self._buffer.reset_index()
         self._buffer = self._buffer.drop_duplicates(subset='index', keep='last')
         self._buffer = self._buffer.set_index('index')
@@ -112,11 +116,11 @@ class Hart85eeris():
 
     def _normalise(self, data):
         """
-        Resample data to 1s and normalise power with voltage measurements. Drop missing
-        values.
+        Resample data to 1s and normalise power with voltage measurements. Drop
+        missing values.
         """
-        # Normalisation. Raise active power to 1.5 and reactive power to 2.5. See Hart's
-        # 1985 paper for an explanation.
+        # Normalisation. Raise active power to 1.5 and reactive power to
+        # 2.5. See Hart's 1985 paper for an explanation.
         # Just making sure...
         r_data = data.copy()
         r_data.loc[:, 'active'] = data['active'] * \
@@ -127,8 +131,8 @@ class Hart85eeris():
 
     def _detect_edges(self):
         """
-        TODO: Advanced identification of steady states and transitions based on active and
-        reactive power.
+        TODO: Advanced identification of steady states and transitions based on
+        active and reactive power.
         """
         pass
 
@@ -145,7 +149,8 @@ class Hart85eeris():
             tmp_df = self._buffer[['active', 'reactive']]
             prev = tmp_df.loc[self._last_processed_ts].values
             data = tmp_df.loc[self._idx:].values
-        # These are helper variables, to have a single np.concatenate/vstack at the end
+        # These are helper variables, to have a single np.concatenate/vstack at
+        # the end
         edge_list = [self._edges]
         steady_list = [self._steady_states]
         for i in range(data.shape[0]):
@@ -155,26 +160,28 @@ class Hart85eeris():
             if any(np.fabs(diff) > self.STEADY_THRESHOLD):
                 if not self.on_transition:
                     # Starting transition
-                    # Do not register previous edge if it started from 0 (it may be due to
-                    # missing data).
+                    # Do not register previous edge if it started from 0 (it may
+                    # be due to missing data).
                     if any(self._previous_steady_power > np.finfo(float).eps):
                         previous_edge = self.running_avg_power - \
                             self._previous_steady_power
                         if any(np.fabs(previous_edge) > self.SIGNIFICANT_EDGE):
-                            edge_df = pd.DataFrame(data={'start': self._edge_start_ts,
-                                                         'end': self._edge_end_ts,
-                                                         'active': previous_edge[0],
-                                                         'reactive': previous_edge[1],
-                                                         'mark': False},
-                                                   index=[0])
-                            edge_list.append(edge_df)
-                            # self._edges = np.append(self._edges, previous_edge) Too slow
-                    self._steady_end_ts = current_ts
-                    steady_df = pd.DataFrame(data={'start': self._steady_start_ts,
-                                                   'end': self._steady_end_ts,
-                                                   'active': self.running_avg_power[0],
-                                                   'reactive': self.running_avg_power[1]},
+                            edge_df = \
+                                pd.DataFrame(data={'start': self._edge_start_ts,
+                                                   'end': self._edge_end_ts,
+                                                   'active': previous_edge[0],
+                                                   'reactive': previous_edge[1],
+                                                   'mark': False},
                                              index=[0])
+                            edge_list.append(edge_df)
+                    self._steady_end_ts = current_ts
+                    steady_df = \
+                        pd.DataFrame(data={'start': self._steady_start_ts,
+                                           'end': self._steady_end_ts,
+                                           'active': self.running_avg_power[0],
+                                           'reactive':
+                                           self.running_avg_power[1]},
+                                     index=[0])
                     steady_list.append(steady_df)
                     self._previous_steady_power = self.running_avg_power
                     self._edge_start_ts = current_ts
@@ -185,8 +192,8 @@ class Hart85eeris():
                     self.running_edge_estimate = diff
                     self.on_transition = True
                 else:
-                    # Either the transition continues, or it is the start of a steady
-                    # period.
+                    # Either the transition continues, or it is the start of a
+                    # steady period.
                     self._edge_count += 1
                     self.running_edge_estimate += diff
                     self.running_avg_power = data[i, :]
@@ -197,7 +204,8 @@ class Hart85eeris():
                 # Update running average
                 self.running_avg_power *= self._steady_count / \
                     (self._steady_count + 1.0)
-                self.running_avg_power += 1.0 / (self._steady_count + 1.0) * data[i, :]
+                self.running_avg_power += \
+                    1.0 / (self._steady_count + 1.0) * data[i, :]
                 self._steady_count += 1
                 if self.on_transition:
                     # We are in the process of finishing a transition
@@ -221,8 +229,9 @@ class Hart85eeris():
 
     def _static_cluster(self):
         """
-        Clustering step of Hart's method. Here it is implemented as a static clustering
-        step that runs periodically, mapping previous devices to the new device names.
+        Clustering step of Hart's method. Here it is implemented as a static
+        clustering step that runs periodically, mapping previous devices to the
+        new device names.
 
         NOT IMPLEMENTED
         """
@@ -238,20 +247,22 @@ class Hart85eeris():
 
     def _clean_edges_buffer(self):
         """
-        Clean-up edges buffer. This removes matched edges from the buffer, but may also
-        remove edges that have remained in the buffer for a very long time, perform other
-        sanity checks etc. It's currently work in progress.
+        Clean-up edges buffer. This removes matched edges from the buffer, but
+        may also remove edges that have remained in the buffer for a very long
+        time, perform other sanity checks etc. It's currently work in progress.
         """
-        self._edges.drop(self._edges.loc[self._edges['mark']].index, inplace=True)
+        self._edges.drop(self._edges.loc[self._edges['mark']].index,
+                         inplace=True)
         # TODO:
         # Sanity check 1: Matched power should be lower than consumed power
 
     def _match_edges_hart(self):
         """
         On/Off matching using edges (as opposed to clusters). This is the method
-        implemented by Hart for the two-state load monitor (it won't work directly for
-        multi-state appliances). It is implemented as close as possible to Hart's original
-        paper (1985). The approach is rather simplistic and can lead to serious errors.
+        implemented by Hart for the two-state load monitor (it won't work
+        directly for multi-state appliances). It is implemented as close as
+        possible to Hart's original paper (1985). The approach is rather
+        simplistic and can lead to serious errors.
         """
         if self._edges.empty:
             return
@@ -287,12 +298,14 @@ class Hart85eeris():
                 if np.fabs(e1[0] + e2[0]) < T[0]:
                     # Match
                     edge = (np.fabs(e1) + np.fabs(e2)) / 2.0
-                    # Ideally we should keep both start and end times for each edge
+                    # Ideally we should keep both start and end times for each
+                    # edge
                     df = pd.DataFrame({'start': e.iloc[i]['start'],
                                        'end': e.iloc[j]['start'],
                                        'active': edge[0],
                                        'reactive': edge[1]}, index=[0])
-                    self._matches = self._matches.append(df, ignore_index=True, sort=True)
+                    self._matches = self._matches.append(df, ignore_index=True,
+                                                         sort=True)
                     # Get the 'mark' column.
                     c = e.columns.get_loc('mark')
                     e.iat[i, c] = True
@@ -303,8 +316,8 @@ class Hart85eeris():
 
     def _match_edges_hart_live(self):
         """
-        Adaptation of Hart's edge matching algorithm to support the "live" display of
-        eeRIS.
+        Adaptation of Hart's edge matching algorithm to support the "live"
+        display of eeRIS.
         """
         if not self.online_edge_detected:
             if self.live.empty:
@@ -333,8 +346,10 @@ class Hart85eeris():
             df = pd.DataFrame({'name': 'Appliance %d' % (self._appliance_id),
                                'active': e[0],
                                'reactive': e[1],
-                               'previous_active': self._previous_steady_power[0],
-                               'previous_reactive': self._previous_steady_power[1],
+                               'previous_active':
+                               self._previous_steady_power[0],
+                               'previous_reactive':
+                               self._previous_steady_power[1],
                                'final': False},
                               index=[0])
             self.live = pd.concat([df, self.live], ignore_index=True, sort=True)
@@ -342,7 +357,9 @@ class Hart85eeris():
             return
         # Appliance cycle stop. Does it match against previous edges?
         for i in reversed(range(self.live.shape[0])):
-            e0 = self.live.iloc[i][['active', 'reactive']].values.astype(np.float64)
+            e0 = self.live.iloc[i][
+                ['active', 'reactive']
+            ].values.astype(np.float64)
             if e[0] <= -1000:
                 t_active = 0.05 * e[0]
             else:
@@ -372,7 +389,8 @@ class Hart85eeris():
 
     def _update_live(self):
         """
-        Provide information for display at the eeRIS "live" screen. Preliminary version.
+        Provide information for display at the eeRIS "live" screen. Preliminary
+        version.
         """
         # prev = self._est_prev
         step = self._data.shape[0]

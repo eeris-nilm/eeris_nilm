@@ -12,7 +12,7 @@ Proprietary and confidential
 # Demo of edge detection without REST service implementation
 import numpy as np
 import matplotlib.pyplot as plt
-import eco
+from eeris_nilm.datasets import eco
 from eeris_nilm.hart85_eeris import Hart85eeris
 
 

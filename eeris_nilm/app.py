@@ -10,8 +10,8 @@ import sys
 import falcon
 import pymongo
 
-from .nilm import NILM
-from .installation_manager import InstallationManager
+import nilm
+import installation
 
 
 def create_app(dburl, dbname):
@@ -26,9 +26,9 @@ def create_app(dburl, dbname):
 
     # Gunicorn expects the 'application' name
     api = falcon.API()
-    api.add_route('/nilm/{inst_id}', NILM(mdb))
+    api.add_route('/nilm/{inst_id}', nilm.NILM(mdb))
     api.add_route('/installation/{inst_id}/model',
-                  InstallationManager(mdb),
+                  installation.InstallationManager(mdb),
                   suffix='model')
     return api
 
