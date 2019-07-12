@@ -16,7 +16,7 @@ import matplotlib.animation as animation
 from matplotlib.table import table
 from matplotlib.font_manager import FontProperties
 from eeris_nilm.datasets import eco
-from eeris_nilm.hart85_eeris import Hart85eeris
+from eeris_nilm.algorithms import hart
 
 
 class Demo(object):
@@ -30,7 +30,7 @@ class Demo(object):
         self.ymatch = None
 
         # Prepare model
-        self.model = Hart85eeris(installation_id=1)
+        self.model = hart.Hart85eeris(installation_id=1)
         self.current_sec = 0
         self.prev = self.power['active'].iloc[0]
 

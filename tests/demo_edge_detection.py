@@ -13,7 +13,7 @@ Proprietary and confidential
 import numpy as np
 import matplotlib.pyplot as plt
 from eeris_nilm.datasets import eco
-from eeris_nilm.hart85_eeris import Hart85eeris
+from eeris_nilm.algorithms import hart
 
 
 p = 'tests/data/01_sm_csv/01'
@@ -37,9 +37,9 @@ for i in range(0, power.shape[0] // 2, plot_step):
         model._match_edges_hart()
         if model.online_edge_detected and not model.on_transition:
             est_y.append(np.array([prev] * (step // 2)))
-            est_y.append(np.array([prev + model.online_edge[0]] * (step - step // 2)))
+            est_y.append(np.array([prev +
+                                   model.online_edge[0]] * (step - step // 2)))
         elif model.on_transition:
-            # est_y.append(np.array([prev + model.running_edge_estimate[0]] * step))
             est_y.append(np.array([prev] * step))
         else:
             est_y.append(np.array([model.running_avg_power[0]] * step))
