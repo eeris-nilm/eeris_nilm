@@ -10,7 +10,6 @@ Proprietary and confidential
 """
 
 # Demo of edge detection without REST service implementation
-import os
 import sys
 import matplotlib.pyplot as plt
 import matplotlib.animation as animation
@@ -62,11 +61,9 @@ class Demo(object):
 
     def data_gen(self):
         lim = self.power.shape[0] - self.power.shape[0] % self.step
-        i = 0
-        while i < lim:
-            data = self.power.iloc[i:i + self.step]
-            i += self.step
-            yield i - self.step, data
+        for i in range(0, lim, self.step):
+            data = self.power.iloc[i:i+self.step]
+            yield i, data
 
     def __call__(self, data):
         t, y = data
@@ -119,15 +116,10 @@ date_end = '2012-06-10T23:59'
 fig = plt.figure(figsize=(19.2, 10.8), dpi=100)
 ax = plt.subplot(2, 1, 1)
 axt = plt.subplot(2, 1, 2)
-# Setup movie writers
-# Writer = animation.writers['ffmpeg']
-# writer = Writer(fps=15, metadata=dict(artist='Me'), bitrate=1800)
-
 d = Demo(p, date_start, date_end, ax, axt)
 # TODO: Add pause functionality. Does not work yet.
 # fig.canvas.mpl_connect('button_press_event', d.on_click)
 ani = animation.FuncAnimation(fig, d, frames=d.data_gen, init_func=d.init, interval=50,
                               fargs=None, blit=False, repeat=False,
                               save_count=sys.maxsize)
-# ani.save(os.path.basename(p) + '.mp4')
 plt.show()
