@@ -17,8 +17,8 @@ from eeris_nilm.hart85_eeris import Hart85eeris
 
 
 p = 'tests/data/01_sm_csv/01'
-date_start = '2012-06-19T:00:00'
-date_end = '2012-06-19T:23:59'
+date_start = '2012-06-19T00:00'
+date_end = '2012-06-19T23:59'
 step = 5
 plot_step = 3600
 model = Hart85eeris(installation_id=1)
