@@ -1,11 +1,26 @@
-Development notes/issues (until we move to github or redmine): 
+* Development notes/issues (until we move to github or redmine): 
 
- -  Fix buffering and loading of data with errors (reindexing, sorting, etc)
- -  Finalize baseline edge detector
- -  Finalize baseline (Hart-based) NILM
- -  Update service response & implment GET request to store to cenote. 
- -  Write unit tests (esp for the Hart85eeris class)
- -  Finalize services & APIs
- -  Live collection specifications and persistent storage
- -  Update edge detector (sanity checks)
- -  Update edge detector & NILM (PCFG)
+ - Fix buffering and loading of data with errors (reindexing, sorting, etc)
+ - Finalize baseline edge detector
+ - Finalize baseline (Hart-based) NILM
+ - Update service response & implment GET request to store to cenote. 
+ - Write unit tests (esp for the Hart85eeris class)
+ - Finalize services & APIs
+ - Live collection specifications and persistent storage
+ - Update edge detector (sanity checks)
+ - Implement evaluation 
+ - Update edge detector & NILM (PCFG)
+
+
+* TODO list for Hart's algorithm
+
+ - Static clustering 
+ - Dynamic clustering
+ - Confidence levels in detection 
+ - Handle edges that last too long
+ - Sanity checks: Reset when detected exceed consumption
+ - Distinguish between motor and thermal or capacitive load
+ - Post processing: Detect cycles
+ - Post processing: Cycle duration
+ - Post processing: Handle Fridge, wet loads and air conditioning
+

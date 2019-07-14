@@ -12,7 +12,7 @@ Proprietary and confidential
 # Demo of edge detection without REST service implementation
 import sys
 import os
-import pandas as pd
+# import pandas as pd
 import matplotlib.pyplot as plt
 import matplotlib.animation as animation
 from matplotlib.table import table
@@ -69,8 +69,7 @@ class Demo(object):
 
     def __call__(self, data):
         t, y = data
-        self.model.data = y
-        self.model.update()
+        self.model.update(y)
         self.current_sec += self.step
         # Update lines
         self.xdata.extend(list(range(t, t + self.step)))
@@ -79,14 +78,18 @@ class Demo(object):
         lim = max(len(self.xdata), self.time_window)
         self.line_active.set_data(self.xdata[-lim:], self.ydata[-lim:])
         self.line_reactive.set_data(self.xdata[-lim:], self.ydata_r[-lim:])
-        self.line_est.set_data(self.xdata[-lim:], self.model._yest.tolist()[-lim:])
-        self.line_match.set_data(self.xdata[-lim:], self.model._ymatch.tolist()[-lim:])
+        self.line_est.set_data(self.xdata[-lim:],
+                               self.model._yest.tolist()[-lim:])
+        self.line_match.set_data(self.xdata[-lim:],
+                                 self.model._ymatch.tolist()[-lim:])
         # Update axis limits
         xmin, xmax = self.ax.get_xlim()
         xmin = max(0, t - self.time_window)
         xmax = max(self.time_window, t + self.step)
-        ymin = min(self.ydata[-self.time_window:] + self.ydata_r[-self.time_window:])
-        ymax = max(self.ydata[-self.time_window:] + self.ydata_r[-self.time_window:])
+        ymin = min(self.ydata[-self.time_window:] +
+                   self.ydata_r[-self.time_window:])
+        ymax = max(self.ydata[-self.time_window:] +
+                   self.ydata_r[-self.time_window:])
         self.ax.set_xlim(xmin - 100, xmax + 100)
         self.ax.set_ylim(ymin - 50, ymax + 100)
         self.ax.figure.canvas.draw()
@@ -94,20 +97,27 @@ class Demo(object):
         if self.model.live.empty:
             cell_text = [['None', '-', '-']]
         else:
-            cell_text = [self.model.live.iloc[i][['name', 'active', 'reactive']].tolist()
+            cell_text = [self.model.live.iloc[i]
+                         [['name', 'active', 'reactive']].tolist()
                          for i in range(self.model.live.shape[0])]
-        tab = table(self.axt, cell_text, colLabels=['Appliance', 'Active', 'Reactive'],
+        tab = table(self.axt, cell_text,
+                    colLabels=['Appliance', 'Active', 'Reactive'],
                     cellLoc='left', colLoc='left', edges='horizontal')
         for (row, col), cell in tab.get_celld().items():
             if (row == 0) or (col == -1):
-                cell.set_text_props(fontproperties=FontProperties(weight='bold'))
+                cell.set_text_props(
+                    fontproperties=FontProperties(weight='bold')
+                )
         self.axt.clear()
         self.axt.add_table(tab)
         self.axt.set_axis_off()
         self.axt.figure.canvas.draw()
         # TODO (for dates)
         # self.xdata.extend(y.index.strftime('%Y-%m-%d %H:%M:%S').tolist())
-        return self.line_active, self.line_reactive, self.line_est, self.line_match
+        return self.line_active, \
+            self.line_reactive, \
+            self.line_est, \
+            self.line_match
 
 
 # Setup
@@ -120,7 +130,8 @@ p = 'tests/data/01_sm_csv/01'
 # date_list = pd.date_range(start=date_start, end=date_end, freq='D')
 # for date in date_list:
 #     d_start = date.strftime('%Y-%m-%dT%H:%M')
-#     d_end = (date + 1 * date.freq - pd.Timedelta(1, 'm')).strftime('%Y-%m-%dT%H:%M')
+#     d_end = (date + 1 * date.freq - pd.Timedelta(1, 'm')).
+#              strftime('%Y-%m-%dT%H:%M')
 #     fig = plt.figure(figsize=(19.2, 10.8), dpi=100)
 #     ax = plt.subplot(2, 1, 1)
 #     axt = plt.subplot(2, 1, 2)

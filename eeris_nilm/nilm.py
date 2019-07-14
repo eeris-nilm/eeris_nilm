@@ -103,8 +103,7 @@ class NILM(object):
             self._put_count[inst_iid] = 0
         model = self._models[inst_iid]
         # Process the data
-        model.data = data
-        model.update()
+        model.update(data)
         # Store data if needed, and prepare response.
         self._put_count[inst_iid] += 1
         if (self._put_count[inst_iid] % self.STORE_PERIOD == 0):

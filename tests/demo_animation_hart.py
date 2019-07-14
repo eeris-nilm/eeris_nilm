@@ -67,8 +67,7 @@ class Demo(object):
 
     def __call__(self, data):
         t, y = data
-        self.model.data = y
-        self.model.update()
+        self.model.update(y)
         self.current_sec += self.step
         # Update lines
         self.xdata.extend(list(range(t, t + self.step)))
@@ -77,14 +76,18 @@ class Demo(object):
         lim = max(len(self.xdata), self.time_window)
         self.line_active.set_data(self.xdata[-lim:], self.ydata[-lim:])
         self.line_reactive.set_data(self.xdata[-lim:], self.ydata_r[-lim:])
-        self.line_est.set_data(self.xdata[-lim:], self.model._yest.tolist()[-lim:])
-        self.line_match.set_data(self.xdata[-lim:], self.model._ymatch.tolist()[-lim:])
+        self.line_est.set_data(self.xdata[-lim:],
+                               self.model._yest.tolist()[-lim:])
+        self.line_match.set_data(self.xdata[-lim:],
+                                 self.model._ymatch.tolist()[-lim:])
         # Update axis limits
         xmin, xmax = self.ax.get_xlim()
         xmin = max(0, t - self.time_window)
         xmax = max(self.time_window, t + self.step)
-        ymin = min(self.ydata[-self.time_window:] + self.ydata_r[-self.time_window:])
-        ymax = max(self.ydata[-self.time_window:] + self.ydata_r[-self.time_window:])
+        ymin = min(self.ydata[-self.time_window:] +
+                   self.ydata_r[-self.time_window:])
+        ymax = max(self.ydata[-self.time_window:] +
+                   self.ydata_r[-self.time_window:])
         self.ax.set_xlim(xmin - 100, xmax + 100)
         self.ax.set_ylim(ymin - 50, ymax + 100)
         self.ax.figure.canvas.draw()
@@ -92,20 +95,27 @@ class Demo(object):
         if self.model.live.empty:
             cell_text = [['None', '-', '-']]
         else:
-            cell_text = [self.model.live.iloc[i][['name', 'active', 'reactive']].tolist()
+            cell_text = [self.model.live.iloc[i]
+                         [['name', 'active', 'reactive']].tolist()
                          for i in range(self.model.live.shape[0])]
-        tab = table(self.axt, cell_text, colLabels=['Appliance', 'Active', 'Reactive'],
+        tab = table(self.axt, cell_text,
+                    colLabels=['Appliance', 'Active', 'Reactive'],
                     cellLoc='left', colLoc='left', edges='horizontal')
         for (row, col), cell in tab.get_celld().items():
             if (row == 0) or (col == -1):
-                cell.set_text_props(fontproperties=FontProperties(weight='bold'))
+                cell.set_text_props(
+                    fontproperties=FontProperties(weight='bold')
+                )
         self.axt.clear()
         self.axt.add_table(tab)
         self.axt.set_axis_off()
         self.axt.figure.canvas.draw()
         # TODO (for dates)
         # self.xdata.extend(y.index.strftime('%Y-%m-%d %H:%M:%S').tolist())
-        return self.line_active, self.line_reactive, self.line_est, self.line_match
+        return self.line_active, \
+            self.line_reactive, \
+            self.line_est, \
+            self.line_match
 
 
 # Setup
@@ -119,7 +129,8 @@ axt = plt.subplot(2, 1, 2)
 d = Demo(p, date_start, date_end, ax, axt)
 # TODO: Add pause functionality. Does not work yet.
 # fig.canvas.mpl_connect('button_press_event', d.on_click)
-ani = animation.FuncAnimation(fig, d, frames=d.data_gen, init_func=d.init, interval=50,
+ani = animation.FuncAnimation(fig, d, frames=d.data_gen,
+                              init_func=d.init, interval=50,
                               fargs=None, blit=False, repeat=False,
                               save_count=sys.maxsize)
 plt.show()

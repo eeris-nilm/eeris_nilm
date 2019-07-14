@@ -4,14 +4,27 @@ Until we decide on copyright & licensing issues:
 Written by Christos Diou <diou@auth.gr>
 Unauthorized copying of this file, via any medium is strictly prohibited
 Proprietary and confidential
+
+
+
+Modified implementation of Hart's NILM algorithm, adapted for the needs of
+eeRIS. The two most important modifications are (i) support for online detection
+and (ii) rules for fixing errors related with appliances that are not
+two-state.
 """
 
 import numpy as np
 import pandas as pd
+import eeris_nilm.appliance
+import sklearn.cluster
 
 
 class Hart85eeris():
     """ Modified implementation of Hart's NILM algorithm. """
+    # TODO:
+    # - remove the class variables that are not needed
+    # - limit the number of edges and steady states that will be cached
+
     NOMINAL_VOLTAGE = 230.0
     BUFFER_SIZE_SECONDS = 600
     MAX_WINDOW_DAYS = 100
@@ -22,37 +35,64 @@ class Hart85eeris():
     SIGNIFICANT_EDGE = 50
     STEADY_SAMPLES_NUM = 5
     MATCH_THRESHOLD = 35
+    CLUSTER_STEP_DAYS = 1  # Update every day
+    CLUSTER_FIRST_DAYS = 1  # Change to 10 in production
+    CLUSTER_DATA_DAYS = 30 * 3  # Use last 3 months for clustering
 
     def __init__(self, installation_id):
-        # State / helper variables
-        # TODO: remove the variables that are not needed
+        # Almost all variables are needed as class members, to support streaming
+        # support.
+
+        # Running state variables
+
+        # Are we on transition?
         self.on_transition = False
+        # Current edge estimate
         self.running_edge_estimate = np.array([0.0, 0.0])
+        # How many steady samples
         self._steady_count = 0
+        # How many samples in current edge
         self._edge_count = 0
+        # Previous steady state
         self._previous_steady_power = np.array([0.0, 0.0])
+        # Dynamic steady power estimate
         self.running_avg_power = np.array([0.0, 0.0])
+        # Value of last estimate
         self._last_measurement = 0.0
+        # Timestamp of last processed sample
         self._last_processed_ts = None
+
+        # Data variables
+
+        # Data passed for processing
+        self._data_orig = None
+        # Data after preprocessing and normalization
         self._data = None
+        # Data buffer
         self._buffer = None
+        # How many samples have been processed (in 1Hz rate, after resampling)
         self._samples_count = 0
+        # Helper variable, index of first unprocessed sample in burffer
         self._idx = None
+        # Helper variables for visualization (edges, matched devices)
         self._yest = np.array([], dtype='float64')
         self._ymatch = None
         self._ymatch_live = None
         # Installation id (is this necessary?)
         self.installation_id = installation_id
         # List of states and transitions detected so far.
-        # self.steady_states = np.array([], dtype=np.float64).reshape(0, 2)
-        # self.edges = np.array([], dtype=np.float64).reshape(0, 2)
         self._steady_states = pd.DataFrame([],
                                            columns=['start', 'end', 'active',
                                                     'reactive'])
         self._edges = pd.DataFrame([], columns=['start', 'end', 'active',
                                                 'reactive', 'mark'])
+        # Matched devices
         self._matches = pd.DataFrame([], columns=['start', 'end', 'active',
                                                   'reactive'])
+        # Timestamps for keeping track of the data processed, for edges, steady
+        # states and clusters
+        self._start_ts = None
+        self._last_clustering_ts = None
         self._edge_start_ts = None
         self._edge_end_ts = None
         self._steady_start_ts = None
@@ -61,7 +101,11 @@ class Hart85eeris():
         self.online_edge_detected = False
         self.online_edge = np.array([0.0, 0.0])
         self._appliance_id = 0
+        # Dataframe with "live" information
         self.live = pd.DataFrame(columns=['name', 'active', 'reactive'])
+
+        # Appliances
+        self._appliances = {}
 
     @property
     def data(self):
@@ -70,9 +114,7 @@ class Hart85eeris():
     @data.setter
     def data(self, data):
         """
-        Setter for data variable. It also pre-processes the data and updates
-        a sliding window of BUFFER_SIZE_SECONDS of data. Current version assumes
-        1Hz sampling frequency.
+        Setter for data variable.
         """
         if data.shape[0] == 0:
             raise ValueError('Empty dataframe')
@@ -81,20 +123,26 @@ class Hart85eeris():
         if duration > self.MAX_WINDOW_DAYS:
             # Do not process the window, it's too long.
             raise ValueError('Data duration too long')
-        # Normalize power measurements with voltage
-        data = self._normalise(data)
+        # Store the original data
+        self._data_orig = data
+
+    def _preprocess(self):
+        """
+        Data preprocessing setps. It also updates a sliding window of
+        BUFFER_SIZE_SECONDS of data. Current version resamples to 1Hz sampling
+        frequency.
+        """
         if self._buffer is None:
-            self._buffer = data.copy()
+            self._buffer = self._data_orig.copy()
+            assert self._start_ts is None  # Just making sure
+            self._start_ts = self._data_orig.index[0]
         else:
             # Data concerning past dates update the buffer
-            self._buffer = self._buffer.append(data)  # More effective
-            # alternatives?
-        # Round timestamps
+            self._buffer = self._buffer.append(self._data_orig)
+        # Round timestamps to 1s
         self._buffer.index = self._buffer.index.round('1s')
         # Remove possible duplicate entries (keep the last entry), based on
         # timestamp
-        # self._buffer =
-        # self._buffer.loc[~self._buffer.index.duplicated(keep='last')]
         self._buffer = self._buffer.reset_index()
         self._buffer = self._buffer.drop_duplicates(subset='index', keep='last')
         self._buffer = self._buffer.set_index('index')
@@ -103,7 +151,7 @@ class Hart85eeris():
         # Keep only the last BUFFER_SIZE_SECONDS of the buffer
         start_ts = self._buffer.index[-1] - \
             pd.offsets.Second(self.BUFFER_SIZE_SECONDS - 1)
-        self._buffer = self._buffer[self._buffer.index >= start_ts]
+        self._buffer = self._buffer.loc[self._buffer.index >= start_ts]
         if self._last_processed_ts is None:
             self._data = self._buffer
             self._idx = self._buffer.index[0]
@@ -114,19 +162,20 @@ class Hart85eeris():
         # TODO: Handle N/As and zero voltage.
         # TODO: Unit tests with all the unusual cases
 
-    def _normalise(self, data):
+    def _normalize(self):
         """
-        Resample data to 1s and normalise power with voltage measurements. Drop
+        Resample data to 1s and normalize power with voltage measurements. Drop
         missing values.
         """
-        # Normalisation. Raise active power to 1.5 and reactive power to
+        # Normalization. Raise active power to 1.5 and reactive power to
         # 2.5. See Hart's 1985 paper for an explanation.
+
         # Just making sure...
-        r_data = data.copy()
-        r_data.loc[:, 'active'] = data['active'] * \
-            np.power((self.NOMINAL_VOLTAGE / data['voltage']), 1.5)
-        r_data.loc[:, 'reactive'] = data['reactive'] * \
-            np.power((self.NOMINAL_VOLTAGE / data['voltage']), 2.5)
+        r_data = self._data_orig.copy()
+        r_data.loc[:, 'active'] = self._data_orig['active'] * \
+            np.power((self.NOMINAL_VOLTAGE / self._data_orig['voltage']), 1.5)
+        r_data.loc[:, 'reactive'] = self._data_orig['reactive'] * \
+            np.power((self.NOMINAL_VOLTAGE / self._data_orig['voltage']), 2.5)
         return r_data
 
     def _detect_edges(self):
@@ -138,7 +187,7 @@ class Hart85eeris():
 
     def _detect_edges_hart(self):
         """
-        Simplified edge detector, based on Hart's algorithm.
+        Edge detector, based on Hart's algorithm.
         """
         self.online_edge_detected = False
         self.online_edge = np.array([0.0, 0.0])
@@ -233,9 +282,87 @@ class Hart85eeris():
         clustering step that runs periodically, mapping previous devices to the
         new device names.
 
-        NOT IMPLEMENTED
+        In this implementation we use "static" clustering (apply clustering
+        periodically) instead of a dynamic cluster update. We also apply DBSCAN
+        algorithm, to avoid the normality assumptions made by Hart's original
+        algorithm.
         """
-        pass
+        # Select matched edges to use for clustering
+        data = self._matches[['start', 'active', 'reactive']]
+        start_ts = data.index[-1] - pd.offsets.Day(self.CLUSTER_DATA_DAYS)
+        data = data.loc[data.index > start_ts]
+        # Apply DBSCAN.
+        # TODO: Experiment on the options.
+        d = sklearn.cluster.DBSCAN(eps=20, min_samples=5, metric='euclidian',
+                                   metric_params=None, algorithm='brute',
+                                   leaf_size=30, n_jobs=None)
+        d.fit(data[['active', 'reactive']].values)
+        # We need to make sure that devices that were already detected
+        # previously keep the same name.
+        if not self._appliances:
+            # First time we detect appliances
+            for a in d.components_:
+                name = "Appliance %d" % (self._appliance_id)
+                self.appliances[self._appliance_id] = \
+                    eeris_nilm.appliance.Appliance(self._appliance_id,
+                                                   name, a[0], a[1])
+                self._appliance_id += 1
+        else:
+            # First build a temporary list of appliances
+            app_id = 0
+            appliances = dict()
+            for a in d.components_:
+                name = "Appliance %d" % (app_id)
+                appliances[app_id] = \
+                    eeris_nilm.appliance.Appliance(app_id, name, a[0], a[1])
+            # Map to previous
+            self._match_appliances(appliances)
+
+    def _match_appliances(self, a_from, t=20):
+        """
+        Helper function to match between two dictionaries of appliances.
+
+        Parameters
+        ----------
+        a_from : Dictionary of eeris_nilm.Appliance objects that we need to map
+
+        t : Beyond this threshold the devices are considered different
+
+        Returns
+        -------
+        out : None
+        The function updates the _appliances variable
+
+        """
+        # TODO: This is a greedy implementation with many to one mapping. Is
+        # this correct? Should we have an optimal strategy instead? To support
+        # this, we keep the list of all candidates in the implementation.
+        a = dict()
+        mapping = dict()
+        for k in a_from.keys():
+            # Find matching item in a_to.
+            candidates = []
+            for l in self._appliances.keys():
+                d = eeris_nilm.Appliance.distance(a_from[k],
+                                                  self._appliances[l])
+                if d < t:
+                    candidates.append((l, d))
+            # Create the list of candidate matches
+            if candidates:
+                candidates.sort(key=lambda x: x[1])
+                # Simplest approach. Just get the minimum that is below
+                # threshold t
+                mapping[k] = candidates[0][0]
+        # Finally, perform the mapping and update the _appliances class variable
+        for k in a_from.keys():
+            if k in mapping.keys():
+                m = mapping[k]
+                a[m] = self._appliances[m]
+            else:
+                m = "Unknown appliance %d" % (self._appliance_id)
+                a[l] = a_from[k]
+                self._appliance_id += 1
+        self._appliances = a
 
     def _dynamic_cluster(self):
         """
@@ -357,9 +484,8 @@ class Hart85eeris():
             return
         # Appliance cycle stop. Does it match against previous edges?
         for i in reversed(range(self.live.shape[0])):
-            e0 = self.live.iloc[i][
-                ['active', 'reactive']
-            ].values.astype(np.float64)
+            e0 = self.live.\
+                iloc[i][['active', 'reactive']].values.astype(np.float64)
             if e[0] <= -1000:
                 t_active = 0.05 * e[0]
             else:
@@ -428,11 +554,30 @@ class Hart85eeris():
         """
         pass
 
-    def update(self):
+    def update(self, data=None):
         """
         Wrapper to sequence of operations for model update
         """
+        if data is not None:
+            self.data = data
+        # Normalization
+        self._normalize()
+        self._preprocess()
+        # Edge detection
         self._detect_edges_hart()
+        # Edge matching
         self._match_edges_hart()
+        # Clustering
+        # 1. Static clustering option
+        # TODO: Turn this into a thread, if we decide to keep it after all.
+        if self._last_clustering_ts is not None:
+            td = self._last_processed_ts - self._last_clustering_ts
+            if td.days > self.CLUSTER_STEP_DAYS:
+                self._static_cluster()
+        else:
+            td = self._last_processed_ts - self._start_ts
+            if td.days > self.CLUSTER_FIRST_DAYS:
+                self._static_cluster()
+        # Live update
         self._update_live()
         self._match_edges_hart_live()
