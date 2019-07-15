@@ -103,8 +103,9 @@ class Hart85eeris():
         self._appliance_id = 0
         # Dataframe with "live" information, i.e. what is currently operational
         self.live_df = pd.DataFrame(columns=['name', 'active', 'reactive'])
-
-        # Lists of known appliances
+        # List of live appliances
+        self.live = []
+        # Dictionaries of known appliances
         self._appliances = {}
         self._appliances_live = {}
 
@@ -451,72 +452,62 @@ class Hart85eeris():
         """
         if not self.online_edge_detected:
             # No edge was detected
-            if self.live_df.empty:
+            if len(self.live) == 0:
                 return
+            # If we are on a transition, make sure previous edge is finalized
+            # and the device verified
             if self.on_transition:
-                last = self.live_df.index[-1]
-                self.live_df.at[last, 'final'] = True
+                self.live[0].update_appliance_live()
                 return
-            # Update last edge
-            last = self.live_df.index[-1]
-            if not self.live_df.loc[last, 'final']:
-                self.live_df.at[last, 'active'] = \
-                    self.running_avg_power[0] - self._previous_steady_power[0]
-                self.live_df.at[last, 'reactive'] = \
-                    self.running_avg_power[1] - self._previous_steady_power[1]
+            # Update last edge.
+            # Check if we need to reconsider previous matching
+            if not self.live[0].final:
+                name = 'Unknown appliance %d' % (self._appliance_id)
+                p = self.running_avg_power - self._previous_steady_power
+                a = eeris_nilm.appliance.Appliance(self._appliance_id, name,
+                                                   signature=p)
+                # Update if matching changed
+                candidates = self._match_appliances_live(a)
+                if candidates[0] is not self.live[0]:
+                    if not self.live[0].verified:
+                        self._appliances_live.remove(self.live[0])
+                    self.live[0].pop()
+                    self.insert(0, a)
+                else:
+                    # Update signature
+                    self.live[0].signature = p
             return
         e = self.online_edge
         if all(np.fabs(e) < self.SIGNIFICANT_EDGE):
             # Although no edge is added, previous should be finalised
-            if not self.live_df.empty:
-                last = self.live_df.index[-1]
-                self.live_df.at[last, 'final'] = True
+            if len(self.live > 0):
+                self.live[0].update_appliance_live()
             return
         if e[0] > 0:
-            name = 'Appliance %d' % (self._appliance_id)
-            active = e[0]
-            reactive = e[1]
-            a = eeris_nilm.appliance.Appliance(self._appliance_id, name, active,
-                                               reactive)
+            name = 'Unknown appliance %d' % (self._appliance_id)
+            a = eeris_nilm.appliance.Appliance(self._appliance_id, name,
+                                               signature=e)
             # Does this look like a known appliance?
-            k, v = self._match_appliances_live(a)
-            if k is not None:
+            candidates = self._match_appliances_live(a)
+            if len(candidates) == 0:
                 # New appliance
-                self._appliances_live[a.name] = a
-                # Appliance cycle start
-                df = pd.DataFrame({'name': 'Appliance %d' % (self._appliance_id),
-                               'active': e[0],
-                               'reactive': e[1],
-                               'previous_active':
-                               self._previous_steady_power[0],
-                               'previous_reactive':
-                               self._previous_steady_power[1],
-                               'final': False},
-                              index=[0])
-            self.live_df = pd.concat([df, self.live_df], ignore_index=True, sort=True)
-            self._appliance_id += 1
+                self._appliances_live[a.appliance_id] = a
+                self.live.insert(0, a)
+                self._appliance_id += 1
+            else:
+                # Match with previous
+                self.live.insert(0, candidates[0])
+            # Done
             return
         # Appliance cycle stop. Does it match against previous edges?
-        for i in reversed(range(self.live_df.shape[0])):
-            e0 = self.live_df.\
-                iloc[i][['active', 'reactive']].values.astype(np.float64)
-            if e[0] <= -1000:
-                t_active = 0.05 * e[0]
-            else:
-                t_active = self.MATCH_THRESHOLD
-            if np.fabs(e[1]) >= 1000:
-                t_reactive = 0.05 * e[1]
-            else:
-                t_reactive = self.MATCH_THRESHOLD
-            T = np.fabs(np.array([t_active, t_reactive]))
-            # Match only with active power for now
-            if np.fabs(e[0] + e0[0]) < T[0]:
-                # Match. Remove device from live_df
-                self.live_df.drop(self.live_df.index[i], inplace=True)
-                # Finalise all existing live_df edges and break
-                for i in self.live_df.index:
-                    self.live_df.at[i, 'final'] = True
+        for i in range(len(self.live)):
+            e0 = self.live[i].signature
+            if self._match_power(e0, e):
+                self.live.pop([i])
                 break
+        # Make sure all previous appliances are finalized
+        for app in self.live:
+            app.update_appliance_live()
 
     def _match_power(self, p1, p2):
         """
@@ -570,18 +561,14 @@ class Hart85eeris():
         _appliances_live dictionary
 
         """
-        min_d = 1e10
-        key = None
-        value = None
+        candidates = []
         for k in self._appliances_live.keys():
             d = eeris_nilm.appliance.Appliance.distance(
                 self._appliances_live[k], a
             )
-            if d < min_d and d < t:
-                min_d = d
-                key = k
-                value = self._appliances_live[k]
-        return key, value
+            if d < t:
+                candidates.append(self._appliances_live[k])
+        return candidates
 
     def _match_helper(self, start, end, active):
         """
