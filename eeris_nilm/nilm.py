@@ -56,7 +56,8 @@ class NILM(object):
                      "reactive": app.signature[1]}
             d = {"data": app_d, "timestamp": ts}
             payload.append(d)
-        body_d = {"payload": payload}
+        body_d = {"installation_id": str(model.installation_id),
+                  "payload": payload}
         body = json.dumps(body_d)
         return body
 

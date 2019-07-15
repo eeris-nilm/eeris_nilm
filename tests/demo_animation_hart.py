@@ -92,12 +92,11 @@ class Demo(object):
         self.ax.set_ylim(ymin - 50, ymax + 100)
         self.ax.figure.canvas.draw()
         # Add table
-        if self.model.live.empty:
+        if not self.model.live:
             cell_text = [['None', '-', '-']]
         else:
-            cell_text = [self.model.live.iloc[i]
-                         [['name', 'active', 'reactive']].tolist()
-                         for i in range(self.model.live.shape[0])]
+            cell_text = [[m.name, m.signature[0], m.signature[1]]
+                         for m in self.model.live]
         tab = table(self.axt, cell_text,
                     colLabels=['Appliance', 'Active', 'Reactive'],
                     cellLoc='left', colLoc='left', edges='horizontal')
