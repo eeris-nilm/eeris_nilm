@@ -101,11 +101,12 @@ class Hart85eeris():
         self.online_edge_detected = False
         self.online_edge = np.array([0.0, 0.0])
         self._appliance_id = 0
-        # Dataframe with "live" information
-        self.live = pd.DataFrame(columns=['name', 'active', 'reactive'])
+        # Dataframe with "live" information, i.e. what is currently operational
+        self.live_df = pd.DataFrame(columns=['name', 'active', 'reactive'])
 
-        # Appliances
+        # Lists of known appliances
         self._appliances = {}
+        self._appliances_live = {}
 
     @property
     def data(self):
@@ -317,6 +318,8 @@ class Hart85eeris():
                     eeris_nilm.appliance.Appliance(app_id, name, a[0], a[1])
             # Map to previous
             self._match_appliances(appliances)
+        # Sync live appliances
+        self._appliances_live = self._appliances.copy()
 
     def _match_appliances(self, a_from, t=20):
         """
@@ -343,8 +346,8 @@ class Hart85eeris():
             # Find matching item in a_to.
             candidates = []
             for l in self._appliances.keys():
-                d = eeris_nilm.Appliance.distance(a_from[k],
-                                                  self._appliances[l])
+                d = eeris_nilm.appliance.Appliance.distance(a_from[k],
+                                                            self._appliances[l])
                 if d < t:
                     candidates.append((l, d))
             # Create the list of candidate matches
@@ -447,30 +450,41 @@ class Hart85eeris():
         display of eeRIS.
         """
         if not self.online_edge_detected:
-            if self.live.empty:
+            # No edge was detected
+            if self.live_df.empty:
                 return
             if self.on_transition:
-                last = self.live.index[-1]
-                self.live.at[last, 'final'] = True
+                last = self.live_df.index[-1]
+                self.live_df.at[last, 'final'] = True
                 return
             # Update last edge
-            last = self.live.index[-1]
-            if not self.live.loc[last, 'final']:
-                self.live.at[last, 'active'] = \
+            last = self.live_df.index[-1]
+            if not self.live_df.loc[last, 'final']:
+                self.live_df.at[last, 'active'] = \
                     self.running_avg_power[0] - self._previous_steady_power[0]
-                self.live.at[last, 'reactive'] = \
+                self.live_df.at[last, 'reactive'] = \
                     self.running_avg_power[1] - self._previous_steady_power[1]
             return
         e = self.online_edge
         if all(np.fabs(e) < self.SIGNIFICANT_EDGE):
             # Although no edge is added, previous should be finalised
-            if not self.live.empty:
-                last = self.live.index[-1]
-                self.live.at[last, 'final'] = True
+            if not self.live_df.empty:
+                last = self.live_df.index[-1]
+                self.live_df.at[last, 'final'] = True
             return
         if e[0] > 0:
-            # Appliance cycle start
-            df = pd.DataFrame({'name': 'Appliance %d' % (self._appliance_id),
+            name = 'Appliance %d' % (self._appliance_id)
+            active = e[0]
+            reactive = e[1]
+            a = eeris_nilm.appliance.Appliance(self._appliance_id, name, active,
+                                               reactive)
+            # Does this look like a known appliance?
+            k, v = self._match_appliances_live(a)
+            if k is not None:
+                # New appliance
+                self._appliances_live[a.name] = a
+                # Appliance cycle start
+                df = pd.DataFrame({'name': 'Appliance %d' % (self._appliance_id),
                                'active': e[0],
                                'reactive': e[1],
                                'previous_active':
@@ -479,12 +493,12 @@ class Hart85eeris():
                                self._previous_steady_power[1],
                                'final': False},
                               index=[0])
-            self.live = pd.concat([df, self.live], ignore_index=True, sort=True)
+            self.live_df = pd.concat([df, self.live_df], ignore_index=True, sort=True)
             self._appliance_id += 1
             return
         # Appliance cycle stop. Does it match against previous edges?
-        for i in reversed(range(self.live.shape[0])):
-            e0 = self.live.\
+        for i in reversed(range(self.live_df.shape[0])):
+            e0 = self.live_df.\
                 iloc[i][['active', 'reactive']].values.astype(np.float64)
             if e[0] <= -1000:
                 t_active = 0.05 * e[0]
@@ -497,14 +511,83 @@ class Hart85eeris():
             T = np.fabs(np.array([t_active, t_reactive]))
             # Match only with active power for now
             if np.fabs(e[0] + e0[0]) < T[0]:
-                # Match. Remove device from live
-                self.live.drop(self.live.index[i], inplace=True)
-                # Finalise all existing live edges and break
-                for i in self.live.index:
-                    self.live.at[i, 'final'] = True
+                # Match. Remove device from live_df
+                self.live_df.drop(self.live_df.index[i], inplace=True)
+                # Finalise all existing live_df edges and break
+                for i in self.live_df.index:
+                    self.live_df.at[i, 'final'] = True
                 break
 
+    def _match_power(self, p1, p2):
+        """
+        Match power consumption p1 against p2 according to Hart's algorithm.
+
+        Parameters
+        ----------
+
+        p1, p2 : Numpy arrays with two elements (active and reactive power)
+
+        Returns
+        -------
+
+        out : Boolean for match (True) or no match (False)
+
+        """
+        # Can be positive or negative edge
+        if np.fabs(p2[0]) >= 1000:
+            t_active = 0.05 * p2[0]
+        else:
+            t_active = self.MATCH_THRESHOLD
+        if np.fabs(p2[1]) >= 1000:
+            t_reactive = 0.05 * p2[1]
+        else:
+            t_reactive = self.MATCH_THRESHOLD
+        T = np.fabs(np.array([t_active, t_reactive]))
+        # Match only with active power for now
+        if np.fabs(np.fabs(p2[0]) - np.fabs(p1[0])) < T[0]:
+            # Match
+            return True
+        else:
+            return False
+
+    def _match_appliances_live(self, a, t=20):
+        """
+        Helper function to match an online detected appliance against a list of
+        appliances.
+
+        Parameters
+        ----------
+
+        a : eeris_nilm.appliance.Appliance instance. Appliance used for
+        comparison
+
+        t : float. Match threshold
+
+        Returns
+        -------
+
+        key, value : Key and value of the matched appliance in the
+        _appliances_live dictionary
+
+        """
+        min_d = 1e10
+        key = None
+        value = None
+        for k in self._appliances_live.keys():
+            d = eeris_nilm.appliance.Appliance.distance(
+                self._appliances_live[k], a
+            )
+            if d < min_d and d < t:
+                min_d = d
+                key = k
+                value = self._appliances_live[k]
+        return key, value
+
     def _match_helper(self, start, end, active):
+        """
+        Helper function to update the "explained" power consumption _ymatch
+        based on a pair of matched edges.
+        """
         end_sec_inv = (self._last_processed_ts - end).seconds
         if end_sec_inv > self.MAX_DISPLAY_SECONDS:
             return
