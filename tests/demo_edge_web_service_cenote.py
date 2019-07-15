@@ -11,10 +11,8 @@ Proprietary and confidential
 
 # Demo of edge detection without REST service implementation
 import sys
-import numpy as np
 import requests
 import json
-import matplotlib.pyplot as plt
 from eeris_nilm.datasets import eco
 
 p = 'tests/data/01_sm_csv/01'
@@ -34,9 +32,6 @@ current_sec = 0
 
 # Prepare data and plots
 phase_list, power = eco.read_eco(p, date_start, date_end)
-fig, ax = plt.subplots()
-plt.grid()
-yest = np.array([], dtype='float64')
 
 # Main loop
 for i in range(0, power.shape[0], step):
@@ -46,21 +41,8 @@ for i in range(0, power.shape[0], step):
     if r.status_code != 200:
         print("Something went wrong, received HTTP %d" % (r.status_code))
         sys.exit(1)
-    resp = json.loads(r.text)
-    yest = np.concatenate([yest, np.array(resp['_yest'])])
-    r = requests.get(nilm_url)
-    if r.status_code != 200:
-        print("Something went wrong, received HTTP %d" % (r.status_code))
-    live = r.text
+    live = json.loads(r.text)
     print(live)
     n_requests += 1
-    current_sec += step
-    if i > plot_step:
-        yest = yest[-plot_step:]
-        ax.clear()
-        plt.grid()
-        d = power.iloc[i-plot_step+step:i+step]
-        plt.plot(d.index, d['active'].values, 'b')
-        plt.plot(d.index, yest, 'r')
-        fig.autofmt_xdate()
-        plt.pause(0.05)
+    if n_requests > 100:
+        break

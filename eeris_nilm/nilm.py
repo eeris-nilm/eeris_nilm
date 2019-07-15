@@ -12,7 +12,7 @@ import datetime as dt
 import pickle
 import json
 
-from algorithms import hart
+from eeris_nilm.algorithms import hart
 
 
 class NILM(object):
@@ -52,8 +52,8 @@ class NILM(object):
         for i in range(len(model.live)):
             app = model.live[i]
             app_d = {"name": app.name,
-                     "active": app.signature[0],
-                     "reactive": app.signature[1]}
+                     "active": ("%.2f") % (app.signature[0]),
+                     "reactive": ("%.2f") % (app.signature[1])}
             d = {"data": app_d, "timestamp": ts}
             payload.append(d)
         body_d = {"installation_id": str(model.installation_id),
@@ -152,6 +152,6 @@ class NILM(object):
                                           }
                                          })
         # resp.body = 'OK'
-        lret = data.shape[0]
-        resp.body = self._prepare_response_body(model, lret=lret)
+        # lret = data.shape[0]
+        resp.body = self._prepare_response_body(model)
         resp.status = falcon.HTTP_200  # Default status

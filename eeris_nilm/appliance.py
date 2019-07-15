@@ -22,7 +22,7 @@ class Appliance():
         self.signature = signature
         self.final = False  # We are allowed to modify signature
         self.verified = False  # Not sure it is actually a new appliance
-        self.p_signature = None  # Previous signature (for running average)
+        self.p_signature = signature  # Previous signature (for running average)
 
     def distance(app1, app2):
         """
@@ -47,6 +47,7 @@ class Appliance():
         """
         if not self.final:
             self.final = True
-        # Running average
-        self.signature = 0.9 * self.p_signature + 0.1 * self.signature
+        # Running average. TODO: Introduce checks for highly abnormal new value?
+        if self.p_signature is not None:
+            self.signature = 0.9 * self.p_signature + 0.1 * self.signature
         self.p_signature = self.signature

@@ -417,7 +417,7 @@ class Hart85eeris():
                     continue
                 # Do they match?
                 e2 = e.iloc[j][['active', 'reactive']].values.astype(np.float64)
-                if self._match_buffer(e1, e2):
+                if self._match_power(e1, e2):
                     # Match
                     edge = (np.fabs(e1) + np.fabs(e2)) / 2.0
                     # Ideally we should keep both start and end times for each
@@ -443,7 +443,7 @@ class Hart85eeris():
         """
         if not self.online_edge_detected:
             # No edge was detected
-            if len(self.live) == 0:
+            if not self.live:
                 return
             # If we are on a transition, make sure previous edge is finalized
             # and the device verified
@@ -455,32 +455,22 @@ class Hart85eeris():
             if not self.live[0].final:
                 name = 'Unknown appliance %d' % (self._appliance_id)
                 p = self.running_avg_power - self._previous_steady_power
-                a = eeris_nilm.appliance.Appliance(self._appliance_id, name,
-                                                   signature=p)
-                # Update if matching changed
-                candidates = self._match_appliances_live(a)
-                if candidates[0] is not self.live[0]:
-                    if not self.live[0].verified:
-                        self._appliances_live.remove(self.live[0])
-                    self.live[0].pop()
-                    self.insert(0, a)
-                else:
-                    # Update signature
-                    self.live[0].signature = p
+                # Update signature
+                self.live[0].signature = p
             return
         e = self.online_edge
         if all(np.fabs(e) < self.SIGNIFICANT_EDGE):
             # Although no edge is added, previous should be finalised
-            if len(self.live > 0):
+            if self.live:
                 self.live[0].update_appliance_live()
             return
         if e[0] > 0:
             name = 'Unknown appliance %d' % (self._appliance_id)
             a = eeris_nilm.appliance.Appliance(self._appliance_id, name,
                                                signature=e)
-            # Does this look like a known appliance?
+            # Does this look like a known appliance that isn't already matched?
             candidates = self._match_appliances_live(a)
-            if len(candidates) == 0:
+            if not candidates:
                 # New appliance
                 self._appliances_live[a.appliance_id] = a
                 self.live.insert(0, a)
@@ -494,7 +484,7 @@ class Hart85eeris():
         for i in range(len(self.live)):
             e0 = self.live[i].signature
             if self._match_power(e0, e):
-                self.live.pop([i])
+                self.live.pop(i)
                 break
         # Make sure all previous appliances are finalized
         for app in self.live:
@@ -554,6 +544,9 @@ class Hart85eeris():
         """
         candidates = []
         for k in self._appliances_live.keys():
+            # If it's already in live then ignore it
+            if self._appliances_live[k] in self.live:
+                continue
             d = eeris_nilm.appliance.Appliance.distance(
                 self._appliances_live[k], a
             )

@@ -9,9 +9,8 @@ Proprietary and confidential
 import sys
 import falcon
 import pymongo
-
-import nilm
-import installation
+import eeris_nilm.nilm
+import eeris_nilm.installation
 
 
 def create_app(dburl, dbname):
@@ -26,9 +25,9 @@ def create_app(dburl, dbname):
 
     # Gunicorn expects the 'application' name
     api = falcon.API()
-    api.add_route('/nilm/{inst_id}', nilm.NILM(mdb))
+    api.add_route('/nilm/{inst_id}', eeris_nilm.nilm.NILM(mdb))
     api.add_route('/installation/{inst_id}/model',
-                  installation.InstallationManager(mdb),
+                  eeris_nilm.installation.InstallationManager(mdb),
                   suffix='model')
     return api
 
