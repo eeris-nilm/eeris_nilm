@@ -101,8 +101,6 @@ class Hart85eeris():
         self.online_edge_detected = False
         self.online_edge = np.array([0.0, 0.0])
         self._appliance_id = 0
-        # Dataframe with "live" information, i.e. what is currently operational
-        self.live_df = pd.DataFrame(columns=['name', 'active', 'reactive'])
         # List of live appliances
         self.live = []
         # Dictionaries of known appliances
@@ -130,7 +128,7 @@ class Hart85eeris():
 
     def _preprocess(self):
         """
-        Data preprocessing setps. It also updates a sliding window of
+        Data preprocessing steps. It also updates a sliding window of
         BUFFER_SIZE_SECONDS of data. Current version resamples to 1Hz sampling
         frequency.
         """
@@ -172,7 +170,7 @@ class Hart85eeris():
         # Normalization. Raise active power to 1.5 and reactive power to
         # 2.5. See Hart's 1985 paper for an explanation.
 
-        # Just making sure...
+        # Copy the data to be avoid in-place weirdness
         r_data = self._data_orig.copy()
         r_data.loc[:, 'active'] = self._data_orig['active'] * \
             np.power((self.NOMINAL_VOLTAGE / self._data_orig['voltage']), 1.5)
@@ -328,7 +326,8 @@ class Hart85eeris():
 
         Parameters
         ----------
-        a_from : Dictionary of eeris_nilm.Appliance objects that we need to map
+        a_from : Dictionary of eeris_nilm.appliance.Appliance objects that we
+        need to map
 
         t : Beyond this threshold the devices are considered different
 
@@ -339,25 +338,30 @@ class Hart85eeris():
 
         """
         # TODO: This is a greedy implementation with many to one mapping. Is
-        # this correct? Should we have an optimal strategy instead? To support
-        # this, we keep the list of all candidates in the implementation.
+        # this correct? Should we have an globally optimal strategy instead? To
+        # support this, we keep the list of all candidates in the
+        # implementation.
         a = dict()
         mapping = dict()
         for k in a_from.keys():
-            # Find matching item in a_to.
+            # Create the list of candidate matches for the k-th appliance
             candidates = []
             for l in self._appliances.keys():
                 d = eeris_nilm.appliance.Appliance.distance(a_from[k],
                                                             self._appliances[l])
                 if d < t:
                     candidates.append((l, d))
-            # Create the list of candidate matches
             if candidates:
                 candidates.sort(key=lambda x: x[1])
                 # Simplest approach. Just get the minimum that is below
                 # threshold t
-                mapping[k] = candidates[0][0]
-        # Finally, perform the mapping and update the _appliances class variable
+                m = 0
+                while m < len(candidates) and candidates[m][0] in mapping:
+                    m += 1
+                if m < len(candidates):
+                    mapping[k] = candidates[m][0]
+        # Finally, perform the mapping and update the _appliances class
+        # variable.
         for k in a_from.keys():
             if k in mapping.keys():
                 m = mapping[k]
@@ -406,27 +410,14 @@ class Hart85eeris():
             # Only check positive and unmarked
             if e.iloc[i]['active'] < 0 or e.iloc[i]['mark']:
                 continue
-            # Determine matching thresholds
             e1 = e.iloc[i][['active', 'reactive']].values.astype(np.float64)
-            if e1[0] >= 1000:
-                t_active = 0.05 * e1[0]
-            else:
-                t_active = self.MATCH_THRESHOLD
-            if np.fabs(e1[1]) >= 1000:
-                t_reactive = 0.05 * e1[1]
-            else:
-                t_reactive = self.MATCH_THRESHOLD
-            T = np.array([t_active, t_reactive])
             for j in range(i + 1, len(e)):
                 # Edge has been marked before or is positive
                 if e.iloc[j]['active'] >= 0 or e.iloc[j]['mark']:
                     continue
                 # Do they match?
                 e2 = e.iloc[j][['active', 'reactive']].values.astype(np.float64)
-                # if all(np.fabs(e1 + e2) < T):
-                # For now, using only active power
-                # TODO: Improve using reactive with rules
-                if np.fabs(e1[0] + e2[0]) < T[0]:
+                if self._match_buffer(e1, e2):
                     # Match
                     edge = (np.fabs(e1) + np.fabs(e2)) / 2.0
                     # Ideally we should keep both start and end times for each

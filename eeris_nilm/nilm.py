@@ -10,6 +10,7 @@ import falcon
 import pandas as pd
 import datetime as dt
 import pickle
+import json
 
 from algorithms import hart
 
@@ -24,19 +25,51 @@ class NILM(object):
     # persistently?
     STORE_PERIOD = 10
 
-    def __init__(self, mdb):
+    def __init__(self, mdb, response='cenote'):
         # Add state variables as needed
         self._mdb = mdb
         self._models = dict()
         self._put_count = dict()
         self._prev = 0.0
+        self._response = response
 
-    def _prepare_response_body(self, model, lret=5):
+    def _prepare_response_body(self, model):
+        """ Wrapper function """
+        body = None
+        if self._response == 'cenote':
+            body = self._prepare_response_body_cenote(model)
+        elif self._response == 'debug':
+            body = self._prepare_response_body_debug(model)
+        return body
+
+    def _prepare_response_body_cenote(self, model):
         """
+        Prepare a response according to the specifications of Cenote.
+        Check https://authecesofteng.github.io/cenote/ for more information.
+        """
+        ts = dt.datetime.now().timestamp() * 1000
+        payload = []
+        for i in range(len(model.live)):
+            app = model.live[i]
+            app_d = {"name": app.name,
+                     "active": app.signature[0],
+                     "reactive": app.signature[1]}
+            d = {"data": app_d, "timestamp": ts}
+            payload.append(d)
+        body_d = {"payload": payload}
+        body = json.dumps(body_d)
+        return body
+
+    def _prepare_response_body_debug(self, model, lret=5):
+        """
+        DO NOT USE. NEEDS REFACTORING
+
+
         Helper function to prepare response body. lret is the length of the
         returned _yest array (used for development/debugging, ignore it in
         production).
         """
+        return None  # TODO Refactor according to new "live".
         live = model.live[['name', 'active', 'reactive']].to_json()
         ts = dt.datetime.now().strftime('%Y-%m-%dT%H:%M:%S%z')
         body = '''{
