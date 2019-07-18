@@ -11,26 +11,41 @@ Proprietary and confidential
 
 # Demo of edge detection without REST service implementation
 import sys
+import pickle
 import matplotlib.pyplot as plt
 import matplotlib.animation as animation
 from matplotlib.table import table
 from matplotlib.font_manager import FontProperties
 from eeris_nilm.datasets import eco
 from eeris_nilm.algorithms import hart
+import datetime
 
 
 class Demo(object):
     TIME_WINDOW = 1200
+    MODEL_SAVE_STEP = 20
 
-    def __init__(self, path, date_start, date_end, ax, axt):
+    def __init__(self, path, date_start, date_end, ax, axt,
+                 model_path_r=None, model_path_w=None):
         # Load data
         self.step = 5
         self.phase_list, self.power = eco.read_eco(path, date_start, date_end)
         self.xdata, self.ydata, self.ydata_r = [], [], []
         self.ymatch = None
 
-        # Prepare model
-        self.model = hart.Hart85eeris(installation_id=1)
+        # Prepare model.
+        # TODO: Don't keep the files open for writing. Use them when needed.
+        self.model_path_r = model_path_r
+        if model_path_r is None:
+            self.model = hart.Hart85eeris(installation_id=1)
+            self.start_ts = date_start
+        else:
+            fp_r = open(self.model_path_r, "rb")
+            self.model = pickle.load(self.fp_r)
+            fp_r.close()
+            self.start_ts = self.model._last_processed_ts + \
+                datetime.timedelta(seconds=1)
+        self.model_path_w = model_path_w
         self.current_sec = 0
         self.prev = self.power['active'].iloc[0]
 
@@ -50,6 +65,9 @@ class Demo(object):
         self.axt = axt
         self.axt.set_axis_off()
 
+        # Model saving
+        self.save_counter = 0
+
     # def on_click(self, event):
     #     self.pause ^= True
 
@@ -60,8 +78,9 @@ class Demo(object):
         return (self.line_active, self.line_reactive, self.line_est)
 
     def data_gen(self):
-        lim = self.power.shape[0] - self.power.shape[0] % self.step
-        for i in range(0, lim, self.step):
+        self.power = self.power.loc[self.power.index > self.start_ts]
+        end = self.power.shape[0] - self.power.shape[0] % self.step
+        for i in range(0, end, self.step):
             data = self.power.iloc[i:i+self.step]
             yield i, data
 
@@ -111,6 +130,12 @@ class Demo(object):
         self.axt.figure.canvas.draw()
         # TODO (for dates)
         # self.xdata.extend(y.index.strftime('%Y-%m-%d %H:%M:%S').tolist())
+        # Save model
+        if self.model_path_w and \
+           (self.save_counter % self.MODEL_SAVE_STEP == 0):
+            with open(self.model_path_w, "wb") as fp:
+                pickle.dump(self.model, fp)
+        self.save_counter += 1
         return self.line_active, \
             self.line_reactive, \
             self.line_est, \
@@ -120,14 +145,14 @@ class Demo(object):
 # Setup
 # p = '/media/data/datasets/NILM/ECO/02_sm_csv/02'
 p = 'tests/data/01_sm_csv/01'
-date_start = '2012-06-10T19:00'
-date_end = '2012-06-10T23:59'
+date_start = '2012-06-10T00:00'
+date_end = '2012-06-20T23:59'
 fig = plt.figure(figsize=(19.2, 10.8), dpi=100)
 ax = plt.subplot(2, 1, 1)
 axt = plt.subplot(2, 1, 2)
-d = Demo(p, date_start, date_end, ax, axt)
-# TODO: Add pause functionality. Does not work yet.
-# fig.canvas.mpl_connect('button_press_event', d.on_click)
+# model_path_r = 'tests/data/model.pickle'
+model_path_w = 'tests/data/model.pickle'
+d = Demo(p, date_start, date_end, ax, axt, model_path_w=model_path_w)
 ani = animation.FuncAnimation(fig, d, frames=d.data_gen,
                               init_func=d.init, interval=50,
                               fargs=None, blit=False, repeat=False,

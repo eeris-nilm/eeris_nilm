@@ -35,9 +35,11 @@ class Hart85eeris():
     SIGNIFICANT_EDGE = 50
     STEADY_SAMPLES_NUM = 5
     MATCH_THRESHOLD = 35
-    CLUSTER_STEP_DAYS = 1  # Update every day
-    CLUSTER_FIRST_DAYS = 1  # Change to 10 in production
+    # DEBUG: Bring these values to reasonable values when finished.
+    CLUSTER_STEP_DAYS = 1.0/24.0  # Update every day
+    CLUSTER_FIRST_DAYS = 1.0/24.0  # Change to 10 in production
     CLUSTER_DATA_DAYS = 30 * 3  # Use last 3 months for clustering
+    MIN_EDGES_STATIC_CLUSTERING = 5
 
     def __init__(self, installation_id):
         # Almost all variables are needed as class members, to support streaming
@@ -289,7 +291,11 @@ class Hart85eeris():
         """
         # Select matched edges to use for clustering
         data = self._matches[['start', 'active', 'reactive']]
-        start_ts = data.index[-1] - pd.offsets.Day(self.CLUSTER_DATA_DAYS)
+        if len(data) < self.MIN_EDGES_STATIC_CLUSTERING:
+            return
+        # ERROR here!
+        start_ts = data['start'].iloc[-1] - \
+            pd.offsets.Day(self.CLUSTER_DATA_DAYS)
         data = data.loc[data.index > start_ts]
         # Apply DBSCAN.
         # TODO: Experiment on the options.
@@ -319,6 +325,8 @@ class Hart85eeris():
             self._match_appliances(appliances)
         # Sync live appliances
         self._appliances_live = self._appliances.copy()
+        # Set timestamp
+        self._last_clustering_ts = self._buffer.index[-1]
 
     def _match_appliances(self, a_from, t=20):
         """
@@ -626,11 +634,11 @@ class Hart85eeris():
         # TODO: Turn this into a thread, if we decide to keep it after all.
         if self._last_clustering_ts is not None:
             td = self._last_processed_ts - self._last_clustering_ts
-            if td.days > self.CLUSTER_STEP_DAYS:
+            if td.seconds/3600.0/24 > self.CLUSTER_STEP_DAYS:
                 self._static_cluster()
         else:
             td = self._last_processed_ts - self._start_ts
-            if td.days > self.CLUSTER_FIRST_DAYS:
+            if td.seconds/3600.0/24 > self.CLUSTER_FIRST_DAYS:
                 self._static_cluster()
         # Live update
         self._update_live()
