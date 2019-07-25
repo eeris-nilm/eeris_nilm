@@ -40,9 +40,8 @@ class Demo(object):
             self.model = hart.Hart85eeris(installation_id=1)
             self.start_ts = date_start
         else:
-            fp_r = open(self.model_path_r, "rb")
-            self.model = pickle.load(self.fp_r)
-            fp_r.close()
+            with open(self.model_path_r, "rb") as fp_r:
+                self.model = pickle.load(fp_r)
             self.start_ts = self.model._last_processed_ts + \
                 datetime.timedelta(seconds=1)
         self.model_path_w = model_path_w
@@ -92,7 +91,7 @@ class Demo(object):
         self.xdata.extend(list(range(t, t + self.step)))
         self.ydata.extend(y['active'].values.tolist())
         self.ydata_r.extend(y['reactive'].values.tolist())
-        lim = max(len(self.xdata), self.time_window)
+        lim = min(len(self.xdata), self.time_window)
         self.line_active.set_data(self.xdata[-lim:], self.ydata[-lim:])
         self.line_reactive.set_data(self.xdata[-lim:], self.ydata_r[-lim:])
         self.line_est.set_data(self.xdata[-lim:],
@@ -150,9 +149,10 @@ date_end = '2012-06-20T23:59'
 fig = plt.figure(figsize=(19.2, 10.8), dpi=100)
 ax = plt.subplot(2, 1, 1)
 axt = plt.subplot(2, 1, 2)
-# model_path_r = 'tests/data/model.pickle'
+model_path_r = 'tests/data/model.pickle'
 model_path_w = 'tests/data/model.pickle'
-d = Demo(p, date_start, date_end, ax, axt, model_path_w=model_path_w)
+d = Demo(p, date_start, date_end, ax, axt, model_path_r=model_path_r,
+         model_path_w=model_path_w)
 ani = animation.FuncAnimation(fig, d, frames=d.data_gen,
                               init_func=d.init, interval=50,
                               fargs=None, blit=False, repeat=False,

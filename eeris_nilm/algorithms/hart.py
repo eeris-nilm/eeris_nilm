@@ -17,6 +17,7 @@ import numpy as np
 import pandas as pd
 import eeris_nilm.appliance
 import sklearn.cluster
+import sklearn.metrics.pairwise
 
 
 class Hart85eeris():
@@ -102,7 +103,6 @@ class Hart85eeris():
         # For online edge detection
         self.online_edge_detected = False
         self.online_edge = np.array([0.0, 0.0])
-        self._appliance_id = 0
         # List of live appliances
         self.live = []
         # Dictionaries of known appliances
@@ -290,95 +290,114 @@ class Hart85eeris():
         algorithm.
         """
         # Select matched edges to use for clustering
-        data = self._matches[['start', 'active', 'reactive']]
-        if len(data) < self.MIN_EDGES_STATIC_CLUSTERING:
+        matches = self._matches[['start', 'active', 'reactive']]
+        if len(matches) < self.MIN_EDGES_STATIC_CLUSTERING:
             return
-        # ERROR here!
-        start_ts = data['start'].iloc[-1] - \
+        start_ts = matches['start'].iloc[-1] - \
             pd.offsets.Day(self.CLUSTER_DATA_DAYS)
-        data = data.loc[data.index > start_ts]
+        matches = matches.loc[matches['start'] > start_ts]
+        matches = matches[['active', 'reactive']].values
         # Apply DBSCAN.
         # TODO: Experiment on the options.
-        d = sklearn.cluster.DBSCAN(eps=20, min_samples=5, metric='euclidian',
-                                   metric_params=None, algorithm='brute',
-                                   leaf_size=30, n_jobs=None)
-        d.fit(data[['active', 'reactive']].values)
+        d = sklearn.cluster.DBSCAN(eps=20, min_samples=5, metric='euclidean',
+                                   metric_params=None, algorithm='auto',
+                                   leaf_size=30)
+        d.fit(matches)
+        # DBSCAN only: How many clusters are there? Can we derive "centers"?
+        u_labels = np.unique(d.labels_[d.labels_ >= 0])
+        centers = np.zeros((u_labels.shape[0], matches.shape[1]))
+        for l in u_labels:
+            centers[l] = np.mean(matches[d.labels_ == l, :], axis=0)
+
         # We need to make sure that devices that were already detected
         # previously keep the same name.
+        # First build a temporary list of appliances
+        # TODO: What about outliers with large consumption? For now we just
+        # ignore them.
+        appliances = dict()
+        for l in u_labels:
+            a = eeris_nilm.appliance.Appliance(signature=centers[l, :])
+            appliances[a.appliance_id] = a
         if not self._appliances:
             # First time we detect appliances
-            for a in d.components_:
-                name = "Appliance %d" % (self._appliance_id)
-                self.appliances[self._appliance_id] = \
-                    eeris_nilm.appliance.Appliance(self._appliance_id,
-                                                   name, a[0], a[1])
-                self._appliance_id += 1
+            self._appliances = appliances
         else:
-            # First build a temporary list of appliances
-            app_id = 0
-            appliances = dict()
-            for a in d.components_:
-                name = "Appliance %d" % (app_id)
-                appliances[app_id] = \
-                    eeris_nilm.appliance.Appliance(app_id, name, a[0], a[1])
             # Map to previous
-            self._match_appliances(appliances)
+            self._appliances = self._match_appliances(appliances,
+                                                      self._appliances)
         # Sync live appliances
-        self._appliances_live = self._appliances.copy()
+        self._appliances_live = self._match_appliances(self._appliances_live,
+                                                       self._appliances)
         # Set timestamp
         self._last_clustering_ts = self._buffer.index[-1]
 
-    def _match_appliances(self, a_from, t=20):
+    def _match_appliances(self, a_from, a_to, t=20):
         """
         Helper function to match between two dictionaries of appliances.
 
         Parameters
         ----------
         a_from : Dictionary of eeris_nilm.appliance.Appliance objects that we
-        need to map
+        need to map from
+
+        a_to : Dictionary of eeris_nilm.appliance.Appliance objects that we need
+        to map to
 
         t : Beyond this threshold the devices are considered different
 
         Returns
         -------
-        out : None
-        The function updates the _appliances variable
+        out : A tuple (app_dict, app_id) where app_id is a dictionary of
+        eeris_nilm.appliance.Appliance objects where a_from is mapped to a_to,
+        which also include objects that were not mapped. app_id is the current
+        appliance_id.
 
         """
         # TODO: This is a greedy implementation with many to one mapping. Is
-        # this correct? Should we have an globally optimal strategy instead? To
-        # support this, we keep the list of all candidates in the
+        # this correct? Could an alternative strategy be better instead? To
+        # support this, we keep the list of all candidates in the current
         # implementation.
         a = dict()
         mapping = dict()
         for k in a_from.keys():
             # Create the list of candidate matches for the k-th appliance
             candidates = []
-            for l in self._appliances.keys():
-                d = eeris_nilm.appliance.Appliance.distance(a_from[k],
-                                                            self._appliances[l])
+            for l in a_to.keys():
+                d = eeris_nilm.appliance.Appliance.distance(a_from[k], a_to[l])
                 if d < t:
                     candidates.append((l, d))
             if candidates:
                 candidates.sort(key=lambda x: x[1])
                 # Simplest approach. Just get the minimum that is below
                 # threshold t
-                m = 0
-                while m < len(candidates) and candidates[m][0] in mapping:
-                    m += 1
-                if m < len(candidates):
-                    mapping[k] = candidates[m][0]
-        # Finally, perform the mapping and update the _appliances class
-        # variable.
+                #
+                # If we want to avoid mapping to an already mapped appliance,
+                # then do this:
+                # m = 0
+                # while m < len(candidates) and candidates[m][0] in \
+                # mapping.keys():
+                # m += 1
+                # if m < len(candidates):
+                #     mapping[k] = candidates[m][0]
+                #
+                # For now we keep it simple and do this instead:
+                mapping[k] = candidates[0][0]
+        # Finally, perform the mapping. This loop assumes that keys in both
+        # lists are unique (as is the case with appliances created in this
+        # class)
         for k in a_from.keys():
             if k in mapping.keys():
                 m = mapping[k]
-                a[m] = self._appliances[m]
+                a[m] = a_to[m]
             else:
-                m = "Unknown appliance %d" % (self._appliance_id)
-                a[l] = a_from[k]
-                self._appliance_id += 1
-        self._appliances = a
+                # We don't want to keep previous appliances
+                # a[k] = a_to[k]
+                pass
+        # Unmapped new appliances
+        for l in a_to.keys():
+            if l not in a.keys():
+                a[l] = a_from[l]
+        return a
 
     def _dynamic_cluster(self):
         """
@@ -461,7 +480,6 @@ class Hart85eeris():
             # Update last edge.
             # Check if we need to reconsider previous matching
             if not self.live[0].final:
-                name = 'Unknown appliance %d' % (self._appliance_id)
                 p = self.running_avg_power - self._previous_steady_power
                 # Update signature
                 self.live[0].signature = p
@@ -473,13 +491,13 @@ class Hart85eeris():
                 self.live[0].update_appliance_live()
             return
         if e[0] > 0:
-            name = 'Unknown appliance %d' % (self._appliance_id)
-            a = eeris_nilm.appliance.Appliance(self._appliance_id, name,
-                                               signature=e)
+            a = eeris_nilm.appliance.Appliance(signature=e)
+            name = 'Unknown live appliance %d' % (a.appliance_id)
+            a.name = name
             # Does this look like a known appliance that isn't already matched?
             candidates = self._match_appliances_live(a)
             if not candidates:
-                # New appliance
+                # New appliance. Add to live dictionary using id as key.
                 self._appliances_live[a.appliance_id] = a
                 self.live.insert(0, a)
                 self._appliance_id += 1
