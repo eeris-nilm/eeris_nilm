@@ -105,6 +105,8 @@ class Hart85eeris():
         self.online_edge = np.array([0.0, 0.0])
         # List of live appliances
         self.live = []
+        # Current live appliance id
+        self._appliance_id = 0
         # Dictionaries of known appliances
         self._appliances = {}
         self._appliances_live = {}
@@ -316,7 +318,8 @@ class Hart85eeris():
         # ignore them.
         appliances = dict()
         for l in u_labels:
-            a = eeris_nilm.appliance.Appliance(signature=centers[l, :])
+            name = 'Cluster %d' % (l)
+            a = eeris_nilm.appliance.Appliance(l, name, signature=centers[l, :])
             appliances[a.appliance_id] = a
         if not self._appliances:
             # First time we detect appliances
@@ -491,9 +494,9 @@ class Hart85eeris():
                 self.live[0].update_appliance_live()
             return
         if e[0] > 0:
-            a = eeris_nilm.appliance.Appliance(signature=e)
-            name = 'Unknown live appliance %d' % (a.appliance_id)
-            a.name = name
+            name = 'Unknown live appliance %d' % (self._appliance_id)
+            a = eeris_nilm.appliance.Appliance(
+                self._appliance_id, name, signature=e)
             # Does this look like a known appliance that isn't already matched?
             candidates = self._match_appliances_live(a)
             if not candidates:

@@ -36,14 +36,23 @@ class Demo(object):
         # Prepare model.
         # TODO: Don't keep the files open for writing. Use them when needed.
         self.model_path_r = model_path_r
+        new_model = False
         if model_path_r is None:
+            new_model = True
+        else:
+            try:
+                with open(self.model_path_r, "rb") as fp_r:
+                    self.model = pickle.load(fp_r)
+                self.start_ts = self.model._last_processed_ts + \
+                    datetime.timedelta(seconds=1)
+            except IOError:
+                print("Warning: Cannot read model file. Creating model from scratch.")
+                new_model = True
+            else:
+                new_model = False  # Not needed, for emphasis/readability
+        if new_model:
             self.model = hart.Hart85eeris(installation_id=1)
             self.start_ts = date_start
-        else:
-            with open(self.model_path_r, "rb") as fp_r:
-                self.model = pickle.load(fp_r)
-            self.start_ts = self.model._last_processed_ts + \
-                datetime.timedelta(seconds=1)
         self.model_path_w = model_path_w
         self.current_sec = 0
         self.prev = self.power['active'].iloc[0]
