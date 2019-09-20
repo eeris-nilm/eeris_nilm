@@ -9,7 +9,7 @@ Unauthorized copying of this file, via any medium is strictly prohibited
 Proprietary and confidential
 """
 
-# Demo of edge detection without REST service implementation
+# TODO: Load ground truth as well (?)
 import numpy as np
 import pandas as pd
 import os.path
@@ -24,7 +24,7 @@ def read_eco(path, date_start, date_end):
     ----------
     path : Path to the directory of ECO csv files
 
-    date_start : Same as file name (e.g., '2012-06-01')
+    date_start : Same as file name (e.g., '2012-06-01T09:00')
 
     date_end : As above
 

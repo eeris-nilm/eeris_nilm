@@ -52,3 +52,5 @@ class InstallationManager(object):
             "debugInstallation": %s,
             "deletedCount": %d }''' % (debug, d_count)
         resp.status = falcon.HTTP_200
+
+    # TODO: Appliance naming/renaming

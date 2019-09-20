@@ -1,10 +1,13 @@
 Notes on data formats:
+---------------------
 
  - No need for the complexity of NILMTK. We can assume fixed-column format, but we can also make it compatible with nilmtk.
  - Assume (power, active), (power, reactive), voltage, current, power_factor, ...?
 
 
 
+Notes on operation modes
+------------------------
 
 Training mode (continuous)
 
@@ -28,4 +31,15 @@ Visualisations (continuous)
  - Display active appliances (or all)
 
 
+Notes on documentation
+----------------------
+
+Ensure compatibility with numpy (with sphinx).
+Extract sphinx-based documentation at a later stage.
+
+
+Notes on publishing
+-------------------
+
+Prepare for publication. Remove some service-related elements. Integrate to eeRIS using the "submodule" logic.
 

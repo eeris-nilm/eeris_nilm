@@ -19,6 +19,7 @@ from matplotlib.font_manager import FontProperties
 from eeris_nilm.datasets import eco
 from eeris_nilm.algorithms import hart
 import datetime
+import logging
 
 
 class Demo(object):
@@ -29,7 +30,7 @@ class Demo(object):
                  model_path_r=None, model_path_w=None):
         # Load data
         self.step = 5
-        self.phase_list, self.power = eco.read_eco(path, date_start, date_end)
+        _, self.power = eco.read_eco(path, date_start, date_end)
         self.xdata, self.ydata, self.ydata_r = [], [], []
         self.ymatch = None
 
@@ -46,7 +47,8 @@ class Demo(object):
                 self.start_ts = self.model._last_processed_ts + \
                     datetime.timedelta(seconds=1)
             except IOError:
-                print("Warning: Cannot read model file. Creating model from scratch.")
+                print("Warning: Cannot read model file." +
+                      "Creating model from scratch.")
                 new_model = True
             else:
                 new_model = False  # Not needed, for emphasis/readability
@@ -111,6 +113,7 @@ class Demo(object):
         xmin, xmax = self.ax.get_xlim()
         xmin = max(0, t - self.time_window)
         xmax = max(self.time_window, t + self.step)
+        # TODO: This is wrong, I think. Need to merge, not add.
         ymin = min(self.ydata[-self.time_window:] +
                    self.ydata_r[-self.time_window:])
         ymax = max(self.ydata[-self.time_window:] +
@@ -149,6 +152,8 @@ class Demo(object):
             self.line_est, \
             self.line_match
 
+
+logging.basicConfig(level=logging.DEBUG)
 
 # Setup
 # p = '/media/data/datasets/NILM/ECO/02_sm_csv/02'

@@ -18,6 +18,7 @@ import pandas as pd
 import eeris_nilm.appliance
 import sklearn.cluster
 import sklearn.metrics.pairwise
+import logging
 
 
 class Hart85eeris():
@@ -110,6 +111,8 @@ class Hart85eeris():
         # Dictionaries of known appliances
         self._appliances = {}
         self._appliances_live = {}
+
+        logging.debug("Hart object initialized.")
 
     @property
     def data(self):
@@ -301,7 +304,10 @@ class Hart85eeris():
         matches = matches[['active', 'reactive']].values
         # Apply DBSCAN.
         # TODO: Experiment on the options.
-        d = sklearn.cluster.DBSCAN(eps=20, min_samples=5, metric='euclidean',
+        # TODO: Normalize matches in the 0-1 range, so that difference is
+        # percentage! This will perhaps allow better matches.
+        # TODO: Possibly start with high detail and then merge similar clusters?
+        d = sklearn.cluster.DBSCAN(eps=30, min_samples=3, metric='euclidean',
                                    metric_params=None, algorithm='auto',
                                    leaf_size=30)
         d.fit(matches)
@@ -334,6 +340,9 @@ class Hart85eeris():
         # Set timestamp
         self._last_clustering_ts = self._buffer.index[-1]
 
+        logging.debug('Clustering complete. Current list of appliances:')
+        logging.debug(str(self._appliances))
+
     def _match_appliances(self, a_from, a_to, t=20):
         """
         Helper function to match between two dictionaries of appliances.
@@ -350,10 +359,14 @@ class Hart85eeris():
 
         Returns
         -------
-        out : A tuple (app_dict, app_id) where app_id is a dictionary of
-        eeris_nilm.appliance.Appliance objects where a_from is mapped to a_to,
-        which also include objects that were not mapped. app_id is the current
-        appliance_id.
+
+        out : A dictionary of the form { appliance_id: appliance } where
+        appliance is an eeris_nilm.appliance.Appliance object and appliance_id
+        is the id of the appliance. This function maps the appliances in a_from
+        to a_to i.e., adjusts the appliance_id for the appliances that are
+        considered the same in a_from and a_to, keeping the ids of a_to. The
+        dictionary also includes appliances that were not mapped (without
+        changing their appliance_id).
 
         """
         # TODO: This is a greedy implementation with many to one mapping. Is
@@ -387,19 +400,15 @@ class Hart85eeris():
                 mapping[k] = candidates[0][0]
         # Finally, perform the mapping. This loop assumes that keys in both
         # lists are unique (as is the case with appliances created in this
-        # class)
+        # class).
+        # TODO: Perform uniqueness checks!
         for k in a_from.keys():
             if k in mapping.keys():
                 m = mapping[k]
                 a[m] = a_to[m]
             else:
-                # We don't want to keep previous appliances
-                # a[k] = a_to[k]
-                pass
-        # Unmapped new appliances
-        for l in a_to.keys():
-            if l not in a.keys():
-                a[l] = a_from[l]
+                # Unmapped new appliances
+                a[k] = a_from[k]
         return a
 
     def _dynamic_cluster(self):
@@ -650,9 +659,17 @@ class Hart85eeris():
         self._detect_edges_hart()
         # Edge matching
         self._match_edges_hart()
+
         # Clustering
-        # 1. Static clustering option
-        # TODO: Turn this into a thread, if we decide to keep it after all.
+
+        # 1. Static clustering option. If needed we will add a dynamic
+        # clustering option in the future.
+        #
+        # TODO: Turn this into a thread, if we decide to keep it after
+        # all. Updating will need to lock the list of appliances, while
+        # clustering locks the matches, makes a copy, releases the matches and
+        # then performs DBSCAN. It then locks the list of appliances, updates
+        # them and releases them back.
         if self._last_clustering_ts is not None:
             td = self._last_processed_ts - self._last_clustering_ts
             if td.seconds/3600.0/24 > self.CLUSTER_STEP_DAYS:
