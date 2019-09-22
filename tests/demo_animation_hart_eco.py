@@ -113,11 +113,10 @@ class Demo(object):
         xmin, xmax = self.ax.get_xlim()
         xmin = max(0, t - self.time_window)
         xmax = max(self.time_window, t + self.step)
-        # TODO: This is wrong, I think. Need to merge, not add.
         ymin = min(self.ydata[-self.time_window:] +
-                   self.ydata_r[-self.time_window:])
+                   self.ydata_r[-self.time_window:])  # List concatenation
         ymax = max(self.ydata[-self.time_window:] +
-                   self.ydata_r[-self.time_window:])
+                   self.ydata_r[-self.time_window:])  # List concatenation
         self.ax.set_xlim(xmin - 100, xmax + 100)
         self.ax.set_ylim(ymin - 50, ymax + 100)
         self.ax.figure.canvas.draw()
@@ -163,8 +162,8 @@ date_end = '2012-06-20T23:59'
 fig = plt.figure(figsize=(19.2, 10.8), dpi=100)
 ax = plt.subplot(2, 1, 1)
 axt = plt.subplot(2, 1, 2)
-model_path_r = 'tests/data/model.pickle'
-model_path_w = 'tests/data/model.pickle'
+model_path_r = 'tests/data/model_eco.pickle'
+model_path_w = 'tests/data/model_eco.pickle'
 d = Demo(p, date_start, date_end, ax, axt, model_path_r=model_path_r,
          model_path_w=model_path_w)
 ani = animation.FuncAnimation(fig, d, frames=d.data_gen,

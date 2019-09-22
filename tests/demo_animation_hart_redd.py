@@ -36,7 +36,6 @@ class Demo(object):
         self.ymatch = None
 
         # Prepare model.
-        # TODO: Don't keep the files open for writing. Use them when needed.
         self.model_path_r = model_path_r
         new_model = False
         if model_path_r is None:
@@ -110,9 +109,8 @@ class Demo(object):
         xmin, xmax = self.ax.get_xlim()
         xmin = max(0, t - self.time_window)
         xmax = max(self.time_window, t + self.step)
-        # TODO: This is wrong, I think. Need to merge, not add.
-        ymin = min(self.ydata[-self.time_window:])
-        ymax = max(self.ydata[-self.time_window:])
+        ymin = min(self.ydata[-self.time_window:] + [0])  # List concatenation
+        ymax = max(self.ydata[-self.time_window:] + [0])  # List concatenation
         self.ax.set_xlim(xmin - 100, xmax + 100)
         self.ax.set_ylim(ymin - 50, ymax + 100)
         self.ax.figure.canvas.draw()
@@ -120,9 +118,10 @@ class Demo(object):
         if not self.model.live:
             cell_text = [['None', '-', '-']]
         else:
-            cell_text = [[m.name, m.signature[0]] for m in self.model.live]
+            cell_text = [[m.name, m.signature[0], m.signature[1]]
+                         for m in self.model.live]
         tab = table(self.axt, cell_text,
-                    colLabels=['Appliance', 'Active'],
+                    colLabels=['Appliance', 'Active', 'Reactive'],
                     cellLoc='left', colLoc='left', edges='horizontal')
         for (row, col), cell in tab.get_celld().items():
             if (row == 0) or (col == -1):
@@ -151,13 +150,13 @@ logging.basicConfig(level=logging.DEBUG)
 # Setup
 # p = '/media/data/datasets/NILM/ECO/02_sm_csv/02'
 p = 'tests/data/house_1'
-date_start = '2012-06-10T00:00'
-date_end = '2012-06-20T23:59'
+date_start = '2011-04-18T00:00'
+date_end = '2011-04-30T23:59'
 fig = plt.figure(figsize=(19.2, 10.8), dpi=100)
 ax = plt.subplot(2, 1, 1)
 axt = plt.subplot(2, 1, 2)
-model_path_r = 'tests/data/model.pickle'
-model_path_w = 'tests/data/model.pickle'
+model_path_r = 'tests/data/model_redd.pickle'
+model_path_w = 'tests/data/model_redd.pickle'
 d = Demo(p, date_start, date_end, ax, axt, model_path_r=model_path_r,
          model_path_w=model_path_w)
 ani = animation.FuncAnimation(fig, d, frames=d.data_gen,
