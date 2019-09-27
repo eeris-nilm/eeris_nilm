@@ -14,6 +14,7 @@ two-state.
 """
 
 import numpy as np
+import scipy.signal
 import pandas as pd
 import eeris_nilm.appliance
 import sklearn.cluster
@@ -41,7 +42,11 @@ class Hart85eeris():
     CLUSTER_STEP_DAYS = 1.0/24.0  # Update every day
     CLUSTER_FIRST_DAYS = 1.0/24.0  # Change to 10 in production
     CLUSTER_DATA_DAYS = 30 * 3  # Use last 3 months for clustering
-    MIN_EDGES_STATIC_CLUSTERING = 5
+    MIN_EDGES_STATIC_CLUSTERING = 5  # DBSCAN parameter
+    LARGE_POWER = 1e6  # Large power consumption
+    BACKGROUND_UPDATE_DAYS = 10  # How many days since background was updated
+    # How many days since we updated the more "recent" background
+    BACKGROUND_RECENT_DAYS = 5
 
     def __init__(self, installation_id):
         # Almost all variables are needed as class members, to support streaming
@@ -111,7 +116,12 @@ class Hart85eeris():
         # Dictionaries of known appliances
         self._appliances = {}
         self._appliances_live = {}
-
+        # Other variables - needed for sanity checks
+        self._background_active = self.LARGE_POWER
+        self._background_active_recent = self.LARGE_POWER
+        self._background_last_update = None
+        self._background_recent_update = None
+        self._residual_live = None
         logging.debug("Hart object initialized.")
 
     @property
@@ -140,12 +150,12 @@ class Hart85eeris():
         frequency.
         """
         if self._buffer is None:
-            self._buffer = self._data_orig.copy()
+            self._buffer = self._get_normalized_data()
             assert self._start_ts is None  # Just making sure
             self._start_ts = self._data_orig.index[0]
         else:
             # Data concerning past dates update the buffer
-            self._buffer = self._buffer.append(self._data_orig)
+            self._buffer = self._buffer.append(self._get_normalized_data())
         # Round timestamps to 1s
         self._buffer.index = self._buffer.index.round('1s')
         # Remove possible duplicate entries (keep the last entry), based on
@@ -169,10 +179,9 @@ class Hart85eeris():
         # TODO: Handle N/As and zero voltage.
         # TODO: Unit tests with all the unusual cases
 
-    def _normalize(self):
+    def _get_normalized_data(self):
         """
-        Resample data to 1s and normalize power with voltage measurements. Drop
-        missing values.
+        Normalize power with voltage measurements.
         """
         # Normalization. Raise active power to 1.5 and reactive power to
         # 2.5. See Hart's 1985 paper for an explanation.
@@ -640,6 +649,55 @@ class Hart85eeris():
              self._matches['end'],
              self._matches['active'])]
 
+    def _sanity_checks(self):
+        # TODO: Need to activate only in case of edges. Checks need to go back
+        # in time sufficiently.
+        pass
+
+    def _sanity_checks_live(self):
+        """
+        Various sanity checks to correct obvious errors of the live edge
+        matching algorithm. Also, updates some variables (e.g., background,
+        residual power) and statistics of the model.
+        """
+        self._update_background()
+        self._update_residual_live()
+
+    def _update_residual_live(self):
+        pass
+
+    def _update_background(self):
+        """
+        Maintain an estimate of the background power consumption
+        """
+        # First, update the installation's background using a mean filter of
+        # size 3
+        m = scipy.signal.convolve(self._data['active'].values,
+                                  np.array([1.0/3.0, 1.0/3.0, 1.0/3.0]),
+                                  mode='valid')
+        background = np.min(m)
+        if self._background_last_update is not None:
+            days_since_update = (self.data.index[-1] -
+                                 self._background_last_update).days
+        else:
+            days_since_update = 0
+        if self._background_recent_update is not None:
+            days_recent_update = (self.data.index[-1] -
+                                  self._background_recent_update).days
+        else:
+            days_recent_update = 0
+
+        if self._background_active_recent >= background or \
+           days_recent_update >= self.BACKGROUND_RECENT_DAYS:
+            self._background_active_recent = background
+            self._background_recent_update = self.data.index[-1]
+        if days_since_update >= self.BACKGROUND_UPDATE_DAYS:
+            self._background_active = self._background_active_recent
+            self._background_last_update = self._background_recent_update
+        if self._background_active >= background:
+            self._background_active = background
+            self._background_last_update = self.data.index[-1]
+
     def _guess_type(self):
         """
         Guess the appliance type using an unnamed hart model
@@ -652,16 +710,23 @@ class Hart85eeris():
         """
         if data is not None:
             self.data = data
-        # Normalization
-        self._normalize()
+        # Preprocessing: Resampling, normalization, missing values, etc.
         self._preprocess()
         # Edge detection
         self._detect_edges_hart()
         # Edge matching
         self._match_edges_hart()
+        # Sanity checks
+        self._sanity_checks()
+
+        # Live update
+        self._update_live()
+        self._match_edges_hart_live()
+        # Sanity checks - live
+        self._sanity_checks_live()
 
         # Clustering
-
+        #
         # 1. Static clustering option. If needed we will add a dynamic
         # clustering option in the future.
         #
@@ -678,6 +743,3 @@ class Hart85eeris():
             td = self._last_processed_ts - self._start_ts
             if td.seconds/3600.0/24 > self.CLUSTER_FIRST_DAYS:
                 self._static_cluster()
-        # Live update
-        self._update_live()
-        self._match_edges_hart_live()
