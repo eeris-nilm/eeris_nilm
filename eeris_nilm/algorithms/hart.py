@@ -517,7 +517,7 @@ class Hart85eeris():
                 self.live[0].update_appliance_live()
             return
         if e[0] > 0:
-            name = 'Unknown live appliance %d' % (self._appliance_id)
+            name = 'Unknown live appliance %s' % (str(self._appliance_id))
             a = eeris_nilm.appliance.Appliance(
                 self._appliance_id, name, signature=e)
             # Does this look like a known appliance that isn't already matched?

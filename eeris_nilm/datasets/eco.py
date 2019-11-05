@@ -82,8 +82,6 @@ def read_eco(path, date_start, date_end):
             phase_df_list[phase - 1] = \
                 pd.concat([phase_df_list[phase - 1], df_phase])
         d += datetime.timedelta(days=1)
-        if d > d_end:
-            d = d_end
     agg_df = pd.DataFrame([], columns=['active', 'reactive', 'voltage'])
     agg_df['active'] = phase_df_list[0]['active'] + \
         phase_df_list[1]['active'] + \

@@ -163,8 +163,8 @@ logging.basicConfig(level=logging.DEBUG)
 # Setup
 # p = '/media/data/datasets/NILM/ECO/02_sm_csv/02'
 p = 'tests/data/01_sm_csv/01'
-date_start = '2012-06-10T00:00'
-date_end = '2012-06-20T23:59'
+date_start = '2012-06-10T10:00'
+date_end = '2012-06-20T23:00'
 fig = plt.figure(figsize=(19.2, 10.8), dpi=100)
 ax = plt.subplot(2, 1, 1)
 axt = plt.subplot(2, 1, 2)
