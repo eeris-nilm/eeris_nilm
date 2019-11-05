@@ -41,8 +41,7 @@ class InstallationManager(object):
         production. It will not delete model unless the 'debugInstallation'
         field is set to True.
         """
-        inst_iid = int(inst_id)
-        model = self._mdb.models.find_one({"meterId": inst_iid})
+        model = self._mdb.models.find_one({"meterId": inst_id})
         if model is None:
             debug = False
             d_count = 0
@@ -51,7 +50,7 @@ class InstallationManager(object):
             if debug:
                 # There should be only one document. In any case, delete only
                 # one.
-                result = self._mdb.models.delete_one({'meterId': inst_iid})
+                result = self._mdb.models.delete_one({'meterId': inst_id})
                 d_count = int(result.deleted_count)
             else:
                 d_count = 0
