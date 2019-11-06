@@ -59,7 +59,8 @@ class NILM(object):
         payload = []
         for i in range(len(model.live)):
             app = model.live[i]
-            app_d = {"name": app.name,
+            app_d = {"appliance_id": app.appliance_id,
+                     "name": app.name,
                      "active": ("%.2f") % (app.signature[0]),
                      "reactive": ("%.2f") % (app.signature[1])}
             d = {"data": app_d, "timestamp": ts}
