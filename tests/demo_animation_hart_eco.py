@@ -14,7 +14,6 @@ See the License for the specific language governing permissions and
 limitations under the License.
 """
 
-
 # Demo of edge detection without REST service implementation
 import sys
 import pickle

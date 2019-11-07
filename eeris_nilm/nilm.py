@@ -127,7 +127,6 @@ class NILM(object):
             data = pd.read_json(req.stream)
         else:
             raise falcon.HTTPBadRequest("No data provided", "No data provided")
-
         # Load the model, if not available
         if (inst_id not in self._models.keys()):
             inst_doc = self._mdb.models.find_one({"meterId": inst_id})
