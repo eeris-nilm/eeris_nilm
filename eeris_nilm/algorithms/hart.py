@@ -117,7 +117,7 @@ class Hart85eeris():
         self.live = []
         # Current live appliance id.
         # TODO: Keep this only on eeris branch. Remove everywhere else.
-        self._appliance_id = bson.objectid.ObjectId()
+        self._appliance_id = str(bson.objectid.ObjectId())
         # Dictionaries of known appliances
         self._appliances = {}
         self._appliances_live = {}
@@ -526,7 +526,7 @@ class Hart85eeris():
                 # New appliance. Add to live dictionary using id as key.
                 self._appliances_live[a.appliance_id] = a
                 self.live.insert(0, a)
-                self._appliance_id = bson.objectid.ObjectId()
+                self._appliance_id = str(bson.objectid.ObjectId())
             else:
                 # Match with previous
                 self.live.insert(0, candidates[0])
