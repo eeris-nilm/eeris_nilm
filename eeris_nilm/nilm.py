@@ -61,7 +61,7 @@ class NILM(object):
             app = model.live[i]
             app_d = {"appliance_id": app.appliance_id,
                      "name": app.name,
-                     "category": app.category,
+                     "type": app.category,
                      "active": ("%.2f") % (app.signature[0]),
                      "reactive": ("%.2f") % (app.signature[1])}
             d = {"data": app_d, "timestamp": ts}

@@ -50,6 +50,9 @@ def read_eco(path, date_start, date_end):
         print('ECO: Loading building ' + os.path.basename(path) + ', time ' +
               d.strftime('%Y-%m-%dT%H:%M'))
         f = os.path.join(path, d.strftime('%Y-%m-%d') + '.csv')
+        if not os.path.exists(f):
+            d += datetime.timedelta(days=1)
+            continue
         df = pd.read_csv(f, header=None, index_col=False,
                          names=[i for i in range(1, 17)], dtype=np.float32)
         # From nilmtk ECO dataset converter

@@ -19,7 +19,6 @@ import sys
 import numpy as np
 import requests
 import json
-import matplotlib.pyplot as plt
 from eeris_nilm.datasets import eco
 
 p = 'tests/data/01_sm_csv/01'
@@ -31,17 +30,9 @@ nilm_url = 'http://localhost:8000/nilm/1'
 nnst_url = 'http://localhost:8000/installation/1/model'
 # nilm_url = 'http://localhost:9999/nilm/1'
 # nnst_url = 'http://localhost:9999/installation/1/model'
-current_sec = 0
 
-# Prepare, by deleting possible existing models
-# r = requests.delete(inst_url)
-# print('Result of model delete: %s' % (r.text))
-
-# Prepare data and plots
+# Prepare data
 phase_list, power = eco.read_eco(p, date_start, date_end)
-fig, ax = plt.subplots()
-plt.grid()
-yest = np.array([], dtype='float64')
 
 # Main loop
 for i in range(0, power.shape[0], step):
@@ -52,20 +43,9 @@ for i in range(0, power.shape[0], step):
         print("Something went wrong, received HTTP %d" % (r.status_code))
         sys.exit(1)
     resp = json.loads(r.text)
-    yest = np.concatenate([yest, np.array(resp['_yest'])])
+    print("PUT response: %s" % (resp))
     r = requests.get(nilm_url)
     if r.status_code != 200:
         print("Something went wrong, received HTTP %d" % (r.status_code))
     live = r.text
-    print(live)
-    n_requests += 1
-    current_sec += step
-    if i > plot_step:
-        yest = yest[-plot_step:]
-        ax.clear()
-        plt.grid()
-        d = power.iloc[i-plot_step+step:i+step]
-        plt.plot(d.index, d['active'].values, 'b')
-        plt.plot(d.index, yest, 'r')
-        fig.autofmt_xdate()
-        plt.pause(0.05)
+    print("GET response (live): %s" % (live))
