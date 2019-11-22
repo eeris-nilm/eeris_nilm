@@ -23,9 +23,10 @@ class Appliance():
     other data useful for identification through NILM. Work in progress.
     """
 
-    def __init__(self, appliance_id, name, signature=None):
+    def __init__(self, appliance_id, name, category, signature=None):
         self.appliance_id = appliance_id
         self.name = name
+        self.category = category
         self.num_states = 2  # Default is two-state appliance
         self.signature = signature
         self.final = False  # We are allowed to modify signature

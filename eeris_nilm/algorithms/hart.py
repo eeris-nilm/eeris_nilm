@@ -339,7 +339,10 @@ class Hart85eeris():
         appliances = dict()
         for l in u_labels:
             name = 'Cluster %d' % (l)
-            a = eeris_nilm.appliance.Appliance(l, name, signature=centers[l, :])
+            # TODO: Heuristics for determining appliance category
+            category = 'Unknown'
+            a = eeris_nilm.appliance.Appliance(
+                l, name, category, signature=centers[l, :])
             appliances[a.appliance_id] = a
         if not self._appliances:
             # First time we detect appliances
@@ -518,8 +521,10 @@ class Hart85eeris():
             return
         if e[0] > 0:
             name = 'Unknown live appliance %s' % (str(self._appliance_id))
+            # TODO: Determine appliance category
+            category = 'Unknown'
             a = eeris_nilm.appliance.Appliance(
-                self._appliance_id, name, signature=e)
+                self._appliance_id, name, category, signature=e)
             # Does this look like a known appliance that isn't already matched?
             candidates = self._match_appliances_live(a)
             if not candidates:
