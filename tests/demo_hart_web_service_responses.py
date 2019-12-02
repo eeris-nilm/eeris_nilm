@@ -28,8 +28,8 @@ step = 5
 plot_step = 600
 nilm_url = 'http://localhost:8000/nilm/1'
 nnst_url = 'http://localhost:8000/installation/1/model'
-# nilm_url = 'http://localhost:9999/nilm/1'
-# nnst_url = 'http://localhost:9999/installation/1/model'
+# nilm_url = 'http://83.212.104.172:9991/nilm/1'
+# nnst_url = 'http://83.212.104.172:9991/installation/1/model'
 
 # Prepare data
 phase_list, power = eco.read_eco(p, date_start, date_end)

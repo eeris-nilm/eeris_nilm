@@ -162,6 +162,7 @@ class Hart85eeris():
             # Data concerning past dates update the buffer
             self._buffer = self._buffer.append(self._get_normalized_data())
         # Round timestamps to 1s
+        self._buffer = self._buffer.sort_index()
         self._buffer.index = self._buffer.index.round('1s')
         # Remove possible duplicate entries (keep the last entry), based on
         # timestamp
@@ -340,7 +341,7 @@ class Hart85eeris():
         for l in u_labels:
             name = 'Cluster %d' % (l)
             # TODO: Heuristics for determining appliance category
-            category = 'Unknown'
+            category = 'unknown'
             a = eeris_nilm.appliance.Appliance(
                 l, name, category, signature=centers[l, :])
             appliances[a.appliance_id] = a
@@ -731,9 +732,11 @@ class Hart85eeris():
 
         # Live update
         self._update_live()
-        self._match_edges_hart_live()
+
+        # TODO: Fix bugs in sanity checks
+        # self._match_edges_hart_live()
         # Sanity checks - live
-        self._sanity_checks_live()
+        # self._sanity_checks_live()
 
         # Clustering
         #

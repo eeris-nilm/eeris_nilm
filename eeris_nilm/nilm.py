@@ -62,8 +62,9 @@ class NILM(object):
             app_d = {"appliance_id": app.appliance_id,
                      "name": app.name,
                      "type": app.category,
-                     "active": ("%.2f") % (app.signature[0]),
-                     "reactive": ("%.2f") % (app.signature[1])}
+                     "status": True,
+                     "activePower": ("%.2f") % (app.signature[0]),
+                     "reactivePower": ("%.2f") % (app.signature[1])}
             d = {"data": app_d, "timestamp": ts}
             payload.append(d)
         body_d = {"installation_id": str(model.installation_id),
@@ -162,3 +163,12 @@ class NILM(object):
         # lret = data.shape[0]
         resp.body = self._prepare_response_body(model)
         resp.status = falcon.HTTP_200  # Default status
+
+    def on_delete(self, req, resp, inst_id):
+        """
+        On delete, the service flushes the requested model from memory
+        """
+        # Remove the model, if it is loaded
+        if (inst_id in self._models.keys()):
+            del self._models[inst_id]
+        resp.status = falcon.HTTP_200
