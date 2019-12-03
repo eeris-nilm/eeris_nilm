@@ -734,7 +734,7 @@ class Hart85eeris():
         self._update_live()
 
         # TODO: Fix bugs in sanity checks
-        # self._match_edges_hart_live()
+        self._match_edges_hart_live()
         # Sanity checks - live
         # self._sanity_checks_live()
 
