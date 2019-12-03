@@ -523,7 +523,7 @@ class Hart85eeris():
         if e[0] > 0:
             name = 'Unknown live appliance %s' % (str(self._appliance_id))
             # TODO: Determine appliance category
-            category = 'Unknown'
+            category = 'unknown'
             a = eeris_nilm.appliance.Appliance(
                 self._appliance_id, name, category, signature=e)
             # Does this look like a known appliance that isn't already matched?
