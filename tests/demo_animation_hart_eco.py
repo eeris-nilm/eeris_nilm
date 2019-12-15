@@ -34,7 +34,7 @@ class Demo(object):
     def __init__(self, path, date_start, date_end, ax, axt,
                  model_path_r=None, model_path_w=None):
         # Load data
-        self.step = 5
+        self.step = 1
         _, self.power = eco.read_eco(path, date_start, date_end)
         self.xdata, self.ydata, self.ydata_r = [], [], []
         self.ymatch = None
