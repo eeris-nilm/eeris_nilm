@@ -17,7 +17,7 @@ limitations under the License.
 import falcon
 import pandas as pd
 import datetime as dt
-import pickle
+import dill
 import json
 
 from eeris_nilm.algorithms import hart
@@ -111,7 +111,7 @@ class NILM(object):
                                             "an installation that does not" +
                                             "exist")
             else:
-                self._models[inst_id] = pickle.loads(inst_doc['modelHart'])
+                self._models[inst_id] = dill.loads(inst_doc['modelHart'])
         model = self._models[inst_id]
         resp.body = self._prepare_response_body(model)
         resp.status = falcon.HTTP_200
@@ -133,7 +133,7 @@ class NILM(object):
         if (inst_id not in self._models.keys()):
             inst_doc = self._mdb.models.find_one({"meterId": inst_id})
             if inst_doc is None:
-                modelstr = pickle.dumps(
+                modelstr = dill.dumps(
                     hart.Hart85eeris(installation_id=inst_id))
                 inst_doc = {'meterId': inst_id,
                             'lastUpdate':
@@ -141,7 +141,7 @@ class NILM(object):
                             'debugInstallation': True,
                             'modelHart': modelstr}
                 self._mdb.models.insert_one(inst_doc)
-            self._models[inst_id] = pickle.loads(inst_doc['modelHart'])
+            self._models[inst_id] = dill.loads(inst_doc['modelHart'])
             self._put_count[inst_id] = 0
         model = self._models[inst_id]
         # Process the data
@@ -150,7 +150,7 @@ class NILM(object):
         self._put_count[inst_id] += 1
         if (self._put_count[inst_id] % self.STORE_PERIOD == 0):
             # Persistent storage
-            modelstr = pickle.dumps(model)
+            modelstr = dill.dumps(model)
             self._mdb.models.update_one({'meterId': inst_id},
                                         {'$set':
                                          {'meterId': inst_id,
