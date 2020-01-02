@@ -44,6 +44,8 @@ def read_eco(path, date_start, date_end):
     # dropped for now.
     d_start = datetime.datetime.strptime(date_start, '%Y-%m-%dT%H:%M')
     d = d_start
+    start_sec = d.hour * 3600 + d.minute * 60 + d.second
+    end_sec = 24 * 3600
     d_end = datetime.datetime.strptime(date_end, '%Y-%m-%dT%H:%M')
     phase_df_list = [pd.DataFrame(), pd.DataFrame(), pd.DataFrame()]
     while d <= d_end:
@@ -52,9 +54,16 @@ def read_eco(path, date_start, date_end):
         f = os.path.join(path, d.strftime('%Y-%m-%d') + '.csv')
         if not os.path.exists(f):
             d += datetime.timedelta(days=1)
+            d = d.replace(hour=0, minute=0)
             continue
+        if d.date() == d_end.date():
+            # Just making sure, this is redundant
+            d = d.replace(hour=0, minute=0)
+            end_sec = d_end.hour * 3600 + d_end.minute * 60 + d_end.second
         df = pd.read_csv(f, header=None, index_col=False,
                          names=[i for i in range(1, 17)], dtype=np.float32)
+        df = df.iloc[start_sec:end_sec]
+        periods = df.shape[0]  # No missing seconds in dataset
         # From nilmtk ECO dataset converter
         phases = []
         for phase in range(1, 4):
@@ -64,7 +73,7 @@ def read_eco(path, date_start, date_end):
             df_phase['Q'] = reactive
             # No timezone
             df_phase.index = pd.date_range(
-                start=d, periods=3600 * 24, freq='S')
+                start=d, periods=periods, freq='S')
             column_names = {
                 1 + phase: 'active',
                 5 + phase: 'current',
@@ -85,6 +94,8 @@ def read_eco(path, date_start, date_end):
             phase_df_list[phase - 1] = \
                 pd.concat([phase_df_list[phase - 1], df_phase])
         d += datetime.timedelta(days=1)
+        d = d.replace(hour=0, minute=0)
+        start_sec = 0
     agg_df = pd.DataFrame([], columns=['active', 'reactive', 'voltage'])
     agg_df['active'] = phase_df_list[0]['active'] + \
         phase_df_list[1]['active'] + \
