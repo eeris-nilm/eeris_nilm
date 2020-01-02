@@ -318,7 +318,6 @@ class Hart85eeris():
         This function is designed to run as a thread.
         """
         self._lock.acquire()
-        print('DEBUG: cluster acquire 1')
         # Select matched edges to use for clustering
         matches = self._matches.copy()
         matches = matches[['start', 'active', 'reactive']]
@@ -334,7 +333,6 @@ class Hart85eeris():
         # percentage! This will perhaps allow better matches.
         # TODO: Possibly start with high detail and then merge similar clusters?
         self._lock.release()
-        print('DEBUG: cluster release 1')
         d = sklearn.cluster.DBSCAN(eps=30, min_samples=3, metric='euclidean',
                                    metric_params=None, algorithm='auto',
                                    leaf_size=30)
@@ -360,7 +358,6 @@ class Hart85eeris():
             appliances[a.appliance_id] = a
 
         self._lock.acquire()
-        print('DEBUG: cluster acquire 2')
         if not self._appliances:
             # First time we detect appliances
             self._appliances = appliances
@@ -377,7 +374,6 @@ class Hart85eeris():
         logging.debug('Clustering complete. Current list of appliances:')
         logging.debug(str(self._appliances))
         self._lock.release()
-        print('DEBUG: cluster release 2')
 
     def _match_appliances(self, a_from, a_to, t=20):
         """
@@ -739,7 +735,6 @@ class Hart85eeris():
         """
         # Thread-safe
         self._lock.acquire()
-        print('DEBUG: update acquire')
         if data is not None:
             self.data = data
         # Preprocessing: Resampling, normalization, missing values, etc.
@@ -768,7 +763,6 @@ class Hart85eeris():
         else:
             td = self._last_processed_ts - self._start_ts
         self._lock.release()
-        print('DEBUG: update release')
 
         if td.seconds/3600.0/24 > self.CLUSTER_STEP_DAYS:
             if (self._clustering_thread is None) or \
