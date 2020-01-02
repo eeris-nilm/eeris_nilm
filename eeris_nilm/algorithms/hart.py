@@ -20,10 +20,10 @@ import pandas as pd
 import eeris_nilm.appliance
 import sklearn.cluster
 import sklearn.metrics.pairwise
+import threading
 import logging
-# TODO: Use object ids only on eeris branch. I think this is not a good practice in
-# general.
-import bson
+import time
+import bson  # TODO: Stop using object ids (not appropriate here)
 
 
 class Hart85eeris():
@@ -42,9 +42,9 @@ class Hart85eeris():
     SIGNIFICANT_EDGE = 50
     STEADY_SAMPLES_NUM = 5
     MATCH_THRESHOLD = 35
-    # DEBUG: Bring these values to reasonable values when finished.
-    CLUSTER_STEP_DAYS = 1.0/24.0  # Update every day
-    CLUSTER_FIRST_DAYS = 1.0/24.0  # Change to 10 in production
+    # TODO: Check the clustering values
+    CLUSTER_STEP_DAYS = 1.0  # Update every day
+    CLUSTER_FIRST_DAYS = 7.0  # Wait for a seven-day period before first clustering
     CLUSTER_DATA_DAYS = 30 * 3  # Use last 3 months for clustering
     MIN_EDGES_STATIC_CLUSTERING = 5  # DBSCAN parameter
     LARGE_POWER = 1e6  # Large power consumption
@@ -121,12 +121,18 @@ class Hart85eeris():
         # Dictionaries of known appliances
         self._appliances = {}
         self._appliances_live = {}
+
         # Other variables - needed for sanity checks
         self._background_active = self.LARGE_POWER
         self._background_active_recent = self.LARGE_POWER
         self._background_last_update = None
         self._background_recent_update = None
         self._residual_live = None
+
+        # Variables for handling threads
+        self._clustering_thread = None
+        self._lock = threading.Lock()
+
         logging.debug("Hart object initialized.")
 
     @property
@@ -308,9 +314,14 @@ class Hart85eeris():
         periodically) instead of a dynamic cluster update. We also apply DBSCAN
         algorithm, to avoid the normality assumptions made by Hart's original
         algorithm.
+
+        This function is designed to run as a thread.
         """
+        self._lock.acquire()
+        print('DEBUG: cluster acquire 1')
         # Select matched edges to use for clustering
-        matches = self._matches[['start', 'active', 'reactive']]
+        matches = self._matches.copy()
+        matches = matches[['start', 'active', 'reactive']]
         if len(matches) < self.MIN_EDGES_STATIC_CLUSTERING:
             return
         start_ts = matches['start'].iloc[-1] - \
@@ -322,6 +333,8 @@ class Hart85eeris():
         # TODO: Normalize matches in the 0-1 range, so that difference is
         # percentage! This will perhaps allow better matches.
         # TODO: Possibly start with high detail and then merge similar clusters?
+        self._lock.release()
+        print('DEBUG: cluster release 1')
         d = sklearn.cluster.DBSCAN(eps=30, min_samples=3, metric='euclidean',
                                    metric_params=None, algorithm='auto',
                                    leaf_size=30)
@@ -345,6 +358,9 @@ class Hart85eeris():
             a = eeris_nilm.appliance.Appliance(
                 l, name, category, signature=centers[l, :])
             appliances[a.appliance_id] = a
+
+        self._lock.acquire()
+        print('DEBUG: cluster acquire 2')
         if not self._appliances:
             # First time we detect appliances
             self._appliances = appliances
@@ -360,6 +376,8 @@ class Hart85eeris():
 
         logging.debug('Clustering complete. Current list of appliances:')
         logging.debug(str(self._appliances))
+        self._lock.release()
+        print('DEBUG: cluster release 2')
 
     def _match_appliances(self, a_from, a_to, t=20):
         """
@@ -719,6 +737,9 @@ class Hart85eeris():
         """
         Wrapper to sequence of operations for model update
         """
+        # Thread-safe
+        self._lock.acquire()
+        print('DEBUG: update acquire')
         if data is not None:
             self.data = data
         # Preprocessing: Resampling, normalization, missing values, etc.
@@ -740,19 +761,20 @@ class Hart85eeris():
 
         # Clustering
         #
-        # 1. Static clustering option. If needed we will add a dynamic
-        # clustering option in the future.
-        #
-        # TODO: Turn this into a thread, if we decide to keep it after
-        # all. Updating will need to lock the list of appliances, while
-        # clustering locks the matches, makes a copy, releases the matches and
-        # then performs DBSCAN. It then locks the list of appliances, updates
-        # them and releases them back.
+        # Static clustering option. If needed we will add a dynamic
+        # clustering option in the future. This runs as a thread in the background.
         if self._last_clustering_ts is not None:
             td = self._last_processed_ts - self._last_clustering_ts
-            if td.seconds/3600.0/24 > self.CLUSTER_STEP_DAYS:
-                self._static_cluster()
         else:
             td = self._last_processed_ts - self._start_ts
-            if td.seconds/3600.0/24 > self.CLUSTER_FIRST_DAYS:
-                self._static_cluster()
+        self._lock.release()
+        print('DEBUG: update release')
+
+        if td.seconds/3600.0/24 > self.CLUSTER_STEP_DAYS:
+            if (self._clustering_thread is None) or \
+               (not self._clustering_thread.is_alive()):
+                self._clustering_thread = threading.Thread(target=self._static_cluster,
+                                                           name='clustering_thread')
+                self._clustering_thread.start()
+        # To ensure that the lock can be acquired by the thread
+        time.sleep(0.01)
