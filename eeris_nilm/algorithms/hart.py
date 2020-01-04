@@ -22,8 +22,9 @@ import sklearn.cluster
 import sklearn.metrics.pairwise
 import threading
 import logging
+import datetime
 import time
-import bson  # TODO: Stop using object ids (not appropriate here)
+import bson
 
 
 class Hart85eeris():
@@ -32,19 +33,27 @@ class Hart85eeris():
     # - remove the class variables that are not needed
     # - limit the number of edges and steady states that will be cached
 
-    NOMINAL_VOLTAGE = 230.0
-    BUFFER_SIZE_SECONDS = 600
+    # Some of the variables below could be parameters
+
+    NOMINAL_VOLTAGE = 230.0  # Nominal voltage value of system
+    BUFFER_SIZE_SECONDS = 5 * 3600
+
+    # Limiters/thresholds
     MAX_WINDOW_DAYS = 100
     MAX_NUM_STATES = 1000
     MAX_DISPLAY_SECONDS = 10 * 3600
-    # These could be parameters
     STEADY_THRESHOLD = 15
     SIGNIFICANT_EDGE = 50
     STEADY_SAMPLES_NUM = 5
     MATCH_THRESHOLD = 35
+    MAX_MATCH_THRESHOLD_DAYS = 1
+    EDGES_CLEAN_DAYS = 2
+    STEADY_CLEAN_DAYS = 2
+
+    # For clustering
     # TODO: Check the clustering values
     CLUSTER_STEP_DAYS = 1.0  # Update every day
-    CLUSTER_FIRST_DAYS = 7.0  # Wait for a seven-day period before first clustering
+    CLUSTER_FIRST_DAYS = 3.0  # Period before first clustering
     CLUSTER_DATA_DAYS = 30 * 3  # Use last 3 months for clustering
     MIN_EDGES_STATIC_CLUSTERING = 5  # DBSCAN parameter
     LARGE_POWER = 1e6  # Large power consumption
@@ -70,10 +79,10 @@ class Hart85eeris():
         self._previous_steady_power = np.array([0.0, 0.0])
         # Dynamic steady power estimate
         self.running_avg_power = np.array([0.0, 0.0])
-        # Value of last estimate
-        self._last_measurement = 0.0
         # Timestamp of last processed sample
         self._last_processed_ts = None
+        # To save some computations if no edge was detected
+        self._edge_detected = False
 
         # Data variables
 
@@ -116,8 +125,11 @@ class Hart85eeris():
         # List of live appliances
         self.live = []
         # Current live appliance id.
-        # TODO: Keep this only on eeris branch. Remove everywhere else.
+        # NOTE: I don't find using bson object ids is a good practice. Doing
+        # this due to integration requirements by other eeRIS modules.
         self._appliance_id = str(bson.objectid.ObjectId())
+        # This could simply be the appliance id instead of bson.objectid
+        self._appliance_display_id = 0
         # Dictionaries of known appliances
         self._appliances = {}
         self._appliances_live = {}
@@ -129,7 +141,7 @@ class Hart85eeris():
         self._background_recent_update = None
         self._residual_live = None
 
-        # Variables for handling threads
+        # Variables for handling threads. For now, just a lock.
         self._clustering_thread = None
         self._lock = threading.Lock()
 
@@ -161,6 +173,7 @@ class Hart85eeris():
         frequency.
         """
         if self._buffer is None:
+            # Buffer initialization
             self._buffer = self._get_normalized_data()
             assert self._start_ts is None  # Just making sure
             self._start_ts = self._data_orig.index[0]
@@ -175,21 +188,42 @@ class Hart85eeris():
         self._buffer = self._buffer.reset_index()
         self._buffer = self._buffer.drop_duplicates(subset='index', keep='last')
         self._buffer = self._buffer.set_index('index')
-        # Resample to 1s
-        self._buffer = self._buffer.asfreq('1S', method='pad')
         # Keep only the last BUFFER_SIZE_SECONDS of the buffer
         start_ts = self._buffer.index[-1] - \
             pd.offsets.Second(self.BUFFER_SIZE_SECONDS - 1)
         self._buffer = self._buffer.loc[self._buffer.index >= start_ts]
+        # Resample to 1s, filling-in gaps.
+        self._buffer = self._buffer.asfreq('1S', method='pad')
         if self._last_processed_ts is None:
+            # We're just starting
             self._data = self._buffer
             self._idx = self._buffer.index[0]
             self._steady_start_ts = self._idx
+        elif self._last_processed_ts < self._buffer.index[0]:
+            # After a big gap, reset everything
+            self._last_processed_ts = self._buffer.index[0]
+            self._idx = self._last_processed_ts
+            self._data = self._buffer
+            self._reset()
         else:
+            # Normal operation: Just get the data that has not been previously
+            # been processed
             self._idx = self._last_processed_ts + 1 * self._buffer.index.freq
             self._data = self._buffer.loc[self._idx:]
         # TODO: Handle N/As and zero voltage.
         # TODO: Unit tests with all the unusual cases
+
+    def _reset(self):
+        """
+        Reset model parameters. Can be useful after a big gap in the data
+        collection.
+        """
+        self.on_transition = False
+        self.running_edge_estimate = np.array([0.0, 0.0])
+        self._steady_count = 0
+        self._edge_count = 0
+        self._previous_steady_power = np.array([0.0, 0.0])
+        self.running_avg_power = np.array([0.0, 0.0])
 
     def _get_normalized_data(self):
         """
@@ -208,8 +242,8 @@ class Hart85eeris():
 
     def _detect_edges(self):
         """
-        TODO: Advanced identification of steady states and transitions based on
-        active and reactive power.
+        TODO: Advanced identification of steady states and transition features
+        based on active and reactive power.
         """
         pass
 
@@ -217,6 +251,7 @@ class Hart85eeris():
         """
         Edge detector, based on Hart's algorithm.
         """
+        self._edge_detected = False
         self.online_edge_detected = False
         self.online_edge = np.array([0.0, 0.0])
         if self._last_processed_ts is None:
@@ -251,6 +286,7 @@ class Hart85eeris():
                                                    'mark': False},
                                              index=[0])
                             edge_list.append(edge_df)
+                            self._edge_detected = True
                     self._steady_end_ts = current_ts
                     steady_df = \
                         pd.DataFrame(data={'start': self._steady_start_ts,
@@ -302,7 +338,6 @@ class Hart85eeris():
         self._steady_states = pd.concat(steady_list, ignore_index=True)
         # Update last processed
         self._last_processed_ts = self._buffer.index[-1]
-        self._last_measurement = self._buffer.iloc[-1]
 
     def _static_cluster(self):
         """
@@ -333,6 +368,8 @@ class Hart85eeris():
         # percentage! This will perhaps allow better matches.
         # TODO: Possibly start with high detail and then merge similar clusters?
         self._lock.release()
+        debug_t_start = datetime.datetime.now()
+        logging.debug('Initiating static clustering at %s' % debug_t_start)
         d = sklearn.cluster.DBSCAN(eps=30, min_samples=3, metric='euclidean',
                                    metric_params=None, algorithm='auto',
                                    leaf_size=30)
@@ -356,7 +393,11 @@ class Hart85eeris():
             a = eeris_nilm.appliance.Appliance(
                 l, name, category, signature=centers[l, :])
             appliances[a.appliance_id] = a
-
+        debug_t_end = datetime.datetime.now()
+        debug_t_diff = (debug_t_end - debug_t_start)
+        logging.debug('Finished static clustering at %s' % (debug_t_end))
+        logging.debug('Total clustering time: %s seconds' %
+                      (debug_t_diff.seconds))
         self._lock.acquire()
         if not self._appliances:
             # First time we detect appliances
@@ -457,8 +498,25 @@ class Hart85eeris():
         may also remove edges that have remained in the buffer for a very long
         time, perform other sanity checks etc. It's currently work in progress.
         """
+        # Clean marked edges
         self._edges.drop(self._edges.loc[self._edges['mark']].index,
                          inplace=True)
+        # Clean edges that are too far back in time
+        droplist = []
+        for idx, e in self._edges.iterrows():
+            if (self._last_processed_ts - e['end']).days > \
+               self.EDGES_CLEAN_DAYS:
+                droplist.append(idx)
+        self._edges.drop(droplist, inplace=True)
+
+        # Clean steady states that are too far back in time
+        droplist = []
+        for idx, s in self._steady_states.iterrows():
+            if (self._last_processed_ts - s['end']).days > \
+               self.STEADY_CLEAN_DAYS:
+                droplist.append(idx)
+        self._steady_states.drop(droplist, inplace=True)
+
         # TODO:
         # Sanity check 1: Matched power should be lower than consumed power
 
@@ -468,7 +526,7 @@ class Hart85eeris():
         implemented by Hart for the two-state load monitor (it won't work
         directly for multi-state appliances). It is implemented as close as
         possible to Hart's original paper (1985). The approach is rather
-        simplistic and can lead to serious errors.
+        simplistic and can lead to serious detection errors.
         """
         if self._edges.empty:
             return
@@ -485,6 +543,10 @@ class Hart85eeris():
             for j in range(i + 1, len(e)):
                 # Edge has been marked before or is positive
                 if e.iloc[j]['active'] >= 0 or e.iloc[j]['mark']:
+                    continue
+                # Do not match edges very far apart in time
+                if (e.iloc[j]['start'] - e.iloc[i]['end']).days > \
+                   self.MAX_MATCH_THRESHOLD_DAYS:
                     continue
                 # Do they match?
                 e2 = e.iloc[j][['active', 'reactive']].values.astype(np.float64)
@@ -535,7 +597,7 @@ class Hart85eeris():
                 self.live[0].update_appliance_live()
             return
         if e[0] > 0:
-            name = 'Unknown live appliance %s' % (str(self._appliance_id))
+            name = 'Live %s' % (str(self._appliance_display_id))
             # TODO: Determine appliance category
             category = 'unknown'
             a = eeris_nilm.appliance.Appliance(
@@ -547,6 +609,8 @@ class Hart85eeris():
                 self._appliances_live[a.appliance_id] = a
                 self.live.insert(0, a)
                 self._appliance_id = str(bson.objectid.ObjectId())
+                # Increase display id for next appliance
+                self._appliance_display_id += 1
             else:
                 # Match with previous
                 self.live.insert(0, candidates[0])
@@ -731,7 +795,8 @@ class Hart85eeris():
 
     def update(self, data=None):
         """
-        Wrapper to sequence of operations for model update
+        Wrapper to sequence of operations for model update. Normally, this the
+        only function anyone will need to call to use the model.
         """
         # Thread-safe
         self._lock.acquire()
@@ -742,7 +807,9 @@ class Hart85eeris():
         # Edge detection
         self._detect_edges_hart()
         # Edge matching
-        self._match_edges_hart()
+        if self._edge_detected:
+            self._match_edges_hart()
+
         # Sanity checks
         self._sanity_checks()
 
@@ -757,18 +824,20 @@ class Hart85eeris():
         # Clustering
         #
         # Static clustering option. If needed we will add a dynamic
-        # clustering option in the future. This runs as a thread in the background.
+        # clustering option in the future. This runs as a thread in the
+        # background.
         if self._last_clustering_ts is not None:
             td = self._last_processed_ts - self._last_clustering_ts
         else:
             td = self._last_processed_ts - self._start_ts
         self._lock.release()
 
-        if td.seconds/3600.0/24 > self.CLUSTER_STEP_DAYS:
+        if td.days > self.CLUSTER_STEP_DAYS:
             if (self._clustering_thread is None) or \
                (not self._clustering_thread.is_alive()):
-                self._clustering_thread = threading.Thread(target=self._static_cluster,
-                                                           name='clustering_thread')
+                self._clustering_thread = \
+                    threading.Thread(target=self._static_cluster,
+                                     name='clustering_thread')
                 self._clustering_thread.start()
-        # To ensure that the lock can be acquired by the thread
-        time.sleep(0.01)
+            # To ensure that the lock can be acquired by the thread
+            time.sleep(0.01)

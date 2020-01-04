@@ -23,7 +23,7 @@ def date_parser(x):
     return datetime.datetime.fromtimestamp(float(x))
 
 
-def read_redd(path, date_start, date_end, get_channels=True):
+def read_redd(path, date_start=None, date_end=None, get_channels=True):
     """Parse REDD data files.
 
     Parameters
@@ -73,11 +73,18 @@ def read_redd(path, date_start, date_end, get_channels=True):
     data['mains'].insert(1, 'voltage', 230.0)
 
     # Filter by date
-    d_start = datetime.datetime.strptime(date_start, '%Y-%m-%dT%H:%M')
-    d_end = datetime.datetime.strptime(date_end, '%Y-%m-%dT%H:%M')
+    if date_start is not None:
+        d_start = datetime.datetime.strptime(date_start, '%Y-%m-%dT%H:%M')
+    else:
+        d_start = pd.Timestamp.min
+    if date_end is not None:
+        d_end = datetime.datetime.strptime(date_end, '%Y-%m-%dT%H:%M')
+    else:
+        d_end = pd.Timestamp.max
+
     for k in data.keys():
         data[k] = data[k].loc[(data[k].index >= d_start) &
-                              (data[k].index <= d_end)]
+                              (data[k].index < d_end)]
     if get_channels:
         return (data, labels)
     else:
