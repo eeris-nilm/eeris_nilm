@@ -14,13 +14,14 @@ See the License for the specific language governing permissions and
 limitations under the License.
 """
 
+import pandas as pd
 from numpy import linalg as LA
 
 
 class Appliance():
     """
-    Unsupervised appliance model. Includes signatures, usage statistics and
-    other data useful for identification through NILM. Work in progress.
+    Unsupervised appliance model. Includes signatures, usage data and statistics
+    as well as other data useful for identification through NILM.
     """
 
     def __init__(self, appliance_id, name, category, signature=None):
@@ -31,7 +32,11 @@ class Appliance():
         self.signature = signature
         self.final = False  # We are allowed to modify signature
         self.verified = False  # Not sure it is actually a new appliance
+        self.inactive = False  # Has it not been used for a long time?
         self.p_signature = signature  # Previous signature (for running average)
+        # Should we keep data regarding activation of this applicance?
+        self.store_activations = True
+        self.activations = pd.DataFrame([], columns=['start', 'end'])
 
     def distance(app1, app2):
         """

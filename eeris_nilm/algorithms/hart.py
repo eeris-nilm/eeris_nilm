@@ -31,7 +31,8 @@ class Hart85eeris():
     """ Modified implementation of Hart's NILM algorithm. """
     # TODO:
     # - remove the class variables that are not needed
-    # - limit the number of edges and steady states that will be cached
+    # - all "live" data should be part of a different class to simplify things a
+    # little
 
     # Some of the variables below could be parameters
 
@@ -49,6 +50,7 @@ class Hart85eeris():
     MAX_MATCH_THRESHOLD_DAYS = 1
     EDGES_CLEAN_DAYS = 2
     STEADY_CLEAN_DAYS = 2
+    MATCES_CLEAN_DAYS = 6 * 30
 
     # For clustering
     # TODO: Check the clustering values
@@ -108,9 +110,11 @@ class Hart85eeris():
                                                     'reactive'])
         self._edges = pd.DataFrame([], columns=['start', 'end', 'active',
                                                 'reactive', 'mark'])
-        # Matched devices
+        # Matched devices.
         self._matches = pd.DataFrame([], columns=['start', 'end', 'active',
                                                   'reactive'])
+        self._clean_matches = False
+
         # Timestamps for keeping track of the data processed, for edges, steady
         # states and clusters
         self._start_ts = None
@@ -144,6 +148,10 @@ class Hart85eeris():
         # Variables for handling threads. For now, just a lock.
         self._clustering_thread = None
         self._lock = threading.Lock()
+
+        # Installation statistics
+        self._min_active = 0.0
+        self._max_active = 0.0
 
         logging.debug("Hart object initialized.")
 
@@ -492,11 +500,12 @@ class Hart85eeris():
         """
         pass
 
-    def _clean_edges_buffer(self):
+    def _clean_buffers(self):
         """
-        Clean-up edges buffer. This removes matched edges from the buffer, but
-        may also remove edges that have remained in the buffer for a very long
-        time, perform other sanity checks etc. It's currently work in progress.
+        Clean-up edges, steady states and match buffers. This removes matched
+        edges from the buffer, but may also remove edges that have remained in
+        the buffer for a very long time, perform other sanity checks etc. It
+        also removes old steady states and matches.
         """
         # Clean marked edges
         self._edges.drop(self._edges.loc[self._edges['mark']].index,
@@ -507,6 +516,10 @@ class Hart85eeris():
             if (self._last_processed_ts - e['end']).days > \
                self.EDGES_CLEAN_DAYS:
                 droplist.append(idx)
+            else:
+                # Edge times are sorted
+                break
+
         self._edges.drop(droplist, inplace=True)
 
         # Clean steady states that are too far back in time
@@ -515,10 +528,23 @@ class Hart85eeris():
             if (self._last_processed_ts - s['end']).days > \
                self.STEADY_CLEAN_DAYS:
                 droplist.append(idx)
+            else:
+                # Steady state times are sorted
+                break
         self._steady_states.drop(droplist, inplace=True)
 
-        # TODO:
-        # Sanity check 1: Matched power should be lower than consumed power
+        # Clean match buffers (if flag _clean_matches is set to True)
+        if self._clean_matches:
+            droplist = []
+            for idx, m in self._matches.iterrows():
+                if (self._last_clustering_ts - self._matches['end']).days > \
+                   self.MATCES_CLEAN_DAYS:
+                    droplist.append(idx)
+                else:
+                    # Match end time is "approximately" sorted (at least at the
+                    # level of days)
+                    break
+            self._matches.drop(droplist, inplace=True)
 
     def _match_edges_hart(self):
         """
@@ -566,8 +592,8 @@ class Hart85eeris():
                     e.iat[i, c] = True
                     e.iat[j, c] = True
                     break
-        # Perform sanity checks and clean edges.
-        self._clean_edges_buffer()
+        # Perform sanity checks and clean buffers.
+        self._clean_buffers()
 
     def _match_edges_hart_live(self):
         """
@@ -741,6 +767,9 @@ class Hart85eeris():
     def _sanity_checks(self):
         # TODO: Need to activate only in case of edges. Checks need to go back
         # in time sufficiently.
+
+        # TODO:
+        # Sanity check 1: Matched power should be lower than consumed power
         pass
 
     def _sanity_checks_live(self):

@@ -22,8 +22,8 @@ import json
 from eeris_nilm.datasets import eco
 
 p = 'tests/data/01_sm_csv/01'
-date_start = '2012-06-10T19:00'
-date_end = '2012-06-10T23:59'
+date_start = '2012-06-15T00:00'
+date_end = '2012-06-15T23:59'
 step = 5
 plot_step = 600
 nilm_url = 'http://localhost:8000/nilm/1'
