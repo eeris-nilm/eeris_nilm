@@ -63,9 +63,9 @@ class NILM(object):
                      "name": app.name,
                      "type": app.category,
                      "status": True,
-                     "activePower": ("%.2f") % (app.signature[0]),
-                     "reactivePower": ("%.2f") % (app.signature[1])}
-            d = {"data": app_d, "timestamp": str(ts)}
+                     "activePower": app.signature[0],
+                     "reactivePower": app.signature[1]}
+            d = {"data": app_d, "timestamp": ts}
             payload.append(d)
         body_d = {"installation_id": str(model.installation_id),
                   "payload": payload}
