@@ -35,7 +35,7 @@ class Demo(object):
     def __init__(self, path, date_start, date_end, ax, axt,
                  model_path_r=None, model_path_w=None):
         # Load data
-        self.step = 1
+        self.step = 7
         _, self.power = eco.read_eco(path, date_start, date_end)
         self.xdata, self.ydata, self.ydata_r = [], [], []
         self.ymatch = None
@@ -132,6 +132,9 @@ class Demo(object):
         else:
             cell_text = [[m.name, m.signature[0], m.signature[1]]
                          for m in self.model.live]
+        cell_text.append(['Other', self.model.residual_live[0], '-'])
+        cell_text.append(['Background', self.model.background_active, '-'])
+        # cell_text.append(['Avg Power', self.model.running_avg_power[0], '-'])
         tab = table(self.axt, cell_text,
                     colLabels=['Appliance', 'Active', 'Reactive'],
                     cellLoc='left', colLoc='left', edges='horizontal')
@@ -173,7 +176,7 @@ model_path_w = 'tests/data/model_eco.dill'
 d = Demo(p, date_start, date_end, ax, axt, model_path_r=model_path_r,
          model_path_w=model_path_w)
 ani = animation.FuncAnimation(fig, d, frames=d.data_gen,
-                              init_func=d.init, interval=50,
+                              init_func=d.init, interval=1,
                               fargs=None, blit=False, repeat=False,
                               save_count=sys.maxsize)
 plt.show()

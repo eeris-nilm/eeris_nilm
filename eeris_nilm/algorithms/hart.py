@@ -15,7 +15,6 @@ limitations under the License.
 """
 
 import numpy as np
-import scipy.signal
 import pandas as pd
 import eeris_nilm.appliance
 import sklearn.cluster
@@ -45,12 +44,13 @@ class Hart85eeris():
     MAX_DISPLAY_SECONDS = 10 * 3600
     STEADY_THRESHOLD = 15
     SIGNIFICANT_EDGE = 50
-    STEADY_SAMPLES_NUM = 5
+    STEADY_SAMPLES_NUM = 7
     MATCH_THRESHOLD = 35
     MAX_MATCH_THRESHOLD_DAYS = 1
     EDGES_CLEAN_DAYS = 2
     STEADY_CLEAN_DAYS = 2
-    MATCES_CLEAN_DAYS = 6 * 30
+    MATCHES_CLEAN_DAYS = 6 * 30
+    OVERESTIMATION_SECONDS = 20
 
     # For clustering
     # TODO: Check the clustering values
@@ -99,6 +99,7 @@ class Hart85eeris():
         # Helper variable, index of first unprocessed sample in burffer
         self._idx = None
         # Helper variables for visualization (edges, matched devices)
+        # TODO: Do we need these at all?
         self._yest = np.array([], dtype='float64')
         self._ymatch = None
         self._ymatch_live = None
@@ -139,11 +140,12 @@ class Hart85eeris():
         self._appliances_live = {}
 
         # Other variables - needed for sanity checks
-        self._background_active = self.LARGE_POWER
+        self.background_active = self.LARGE_POWER
         self._background_active_recent = self.LARGE_POWER
         self._background_last_update = None
         self._background_recent_update = None
-        self._residual_live = None
+        self.residual_live = None
+        self._count_overestimation = 0
 
         # Variables for handling threads. For now, just a lock.
         self._clustering_thread = None
@@ -232,6 +234,9 @@ class Hart85eeris():
         self._edge_count = 0
         self._previous_steady_power = np.array([0.0, 0.0])
         self.running_avg_power = np.array([0.0, 0.0])
+        self.online_edge_detected = False
+        self.online_edge = np.array([0.0, 0.0])
+        self.live = []
 
     def _get_normalized_data(self):
         """
@@ -247,13 +252,6 @@ class Hart85eeris():
         r_data.loc[:, 'reactive'] = self._data_orig['reactive'] * \
             np.power((self.NOMINAL_VOLTAGE / self._data_orig['voltage']), 2.5)
         return r_data
-
-    def _detect_edges(self):
-        """
-        TODO: Advanced identification of steady states and transition features
-        based on active and reactive power.
-        """
-        pass
 
     def _detect_edges_hart(self):
         """
@@ -492,14 +490,6 @@ class Hart85eeris():
                 a[k] = a_from[k]
         return a
 
-    def _dynamic_cluster(self):
-        """
-        Dynamic clustering step, as proposed by Hart.
-
-        NOT IMPLEMENTED
-        """
-        pass
-
     def _clean_buffers(self):
         """
         Clean-up edges, steady states and match buffers. This removes matched
@@ -538,7 +528,7 @@ class Hart85eeris():
             droplist = []
             for idx, m in self._matches.iterrows():
                 if (self._last_clustering_ts - self._matches['end']).days > \
-                   self.MATCES_CLEAN_DAYS:
+                   self.MATCHES_CLEAN_DAYS:
                     droplist.append(idx)
                 else:
                     # Match end time is "approximately" sorted (at least at the
@@ -643,11 +633,22 @@ class Hart85eeris():
             # Done
             return
         # Appliance cycle stop. Does it match against previous edges?
+        matched = False
         for i in range(len(self.live)):
             e0 = self.live[i].signature
             if self._match_power(e0, e):
                 self.live.pop(i)
+                matched = True
                 break
+        if not matched:
+            # If we reached this point, then the negative edge did not match
+            # anything. This may mean that an appliance will stay turned on
+            # indefinitely.
+            # TODO: Do we need to check this? If something's wrong, what do we
+            # do? Ideas: Match pair of last two edges, keep edge open and wait
+            # for next edge. Reset everything.
+            pass
+
         # Make sure all previous appliances are finalized
         for app in self.live:
             app.update_appliance_live()
@@ -683,6 +684,18 @@ class Hart85eeris():
             return True
         else:
             return False
+
+    # def _negative_no_match_live(self):
+    #     """
+    #     If we have a negative edge without a match.
+    #     """
+    #     e = self.online_edge
+    #     # Redundant check (if we are here it should never evaluate to true).
+    #     if all(np.fabs(e) < self.SIGNIFICANT_EDGE) or e[0] > 0.0:
+    #         return
+    #     # Check if the last two edges are close and we can merge them to find
+    #     # a match.
+    #     if self.edges
 
     def _match_appliances_live(self, a, t=20):
         """
@@ -782,39 +795,63 @@ class Hart85eeris():
         self._update_residual_live()
 
     def _update_residual_live(self):
-        pass
+        """
+        Function to estimate the power that is not accounted for by the NILM
+        algorithms. Note that this can be negative (in case an appliance does
+        not switch off!)
+        """
+        total_estimated = np.array([0.0, 0.0])
+        for a in self.live:
+            total_estimated += a.signature
+        total_estimated += self.background_active
+        if self.running_avg_power[0] < total_estimated[0]:
+            # We may have made a matching error, and an appliance should have
+            # been switched off. Heuristic solution here.
+            # self.live = []
+            # self.residual_live = self.running_avg_power
+            self._count_overestimation += 1
+            if self._count_overestimation > self.OVERESTIMATION_SECONDS:
+                self.live = []
+                total_estimated = self.background_active
+        else:
+            self._count_overestimation = 0
+        self.residual_live = self.running_avg_power - total_estimated
 
     def _update_background(self):
         """
         Maintain an estimate of the background power consumption
         """
-        # First, update the installation's background using a mean filter of
-        # size 3
-        m = scipy.signal.convolve(self._data['active'].values,
-                                  np.array([1.0/3.0, 1.0/3.0, 1.0/3.0]),
-                                  mode='valid')
-        background = np.min(m)
+        steady_states = self._steady_states['active'].values
+        # We assume that background consumption is more than 1 Watt. This
+        # ignores missing values or errors in measurements that result in
+        # zeros.
+        v = steady_states[steady_states > 1.0]
+        if v.shape[0] > 0:
+            background = np.min(v)
+        else:
+            # Return if no new values have been added.
+            return
+
+        # Days since update of background and recent estimate
         if self._background_last_update is not None:
             days_since_update = (self.data.index[-1] -
                                  self._background_last_update).days
         else:
-            days_since_update = 0
+            days_since_update = self.BACKGROUND_UPDATE_DAYS + 1
+
         if self._background_recent_update is not None:
             days_recent_update = (self.data.index[-1] -
                                   self._background_recent_update).days
         else:
             days_recent_update = 0
 
-        if self._background_active_recent >= background or \
+        if self._background_active_recent > background or \
            days_recent_update >= self.BACKGROUND_RECENT_DAYS:
             self._background_active_recent = background
             self._background_recent_update = self.data.index[-1]
         if days_since_update >= self.BACKGROUND_UPDATE_DAYS:
-            self._background_active = self._background_active_recent
+            self.background_active = self._background_active_recent
             self._background_last_update = self._background_recent_update
-        if self._background_active >= background:
-            self._background_active = background
-            self._background_last_update = self.data.index[-1]
 
     def _guess_type(self):
         """
@@ -848,7 +885,7 @@ class Hart85eeris():
         # TODO: Fix bugs in sanity checks
         self._match_edges_hart_live()
         # Sanity checks - live
-        # self._sanity_checks_live()
+        self._sanity_checks_live()
 
         # Clustering
         #
