@@ -62,8 +62,8 @@ class NILM(object):
                  "name": "Background",
                  "type": "background",
                  "status": True,
-                 "activePower": 0.0,  # model.background_active,
-                 "reactivePower": 0.0}
+                 "active": 0.0,  # model.background_active,
+                 "reactive": 0.0}
         d = {"data": app_d, "timestamp": ts}
         payload.append(d)
         for i in range(len(model.live)):
@@ -72,16 +72,16 @@ class NILM(object):
                      "name": app.name,
                      "type": app.category,
                      "status": True,
-                     "activePower": app.signature[0],
-                     "reactivePower": app.signature[1]}
+                     "active": app.signature[0],
+                     "reactive": app.signature[1]}
             d = {"data": app_d, "timestamp": ts}
             payload.append(d)
         app_d = {"_id": "fffffffffffffffffffffff0",
                  "name": "Other",
                  "type": "residual",
                  "status": True,
-                 "activePower": 0.0,  # model.residual_live[0],
-                 "reactivePower": 0.0}  # model.residual_live[1]}
+                 "active": 0.0,  # model.residual_live[0],
+                 "reactive": 0.0}  # model.residual_live[1]}
         d = {"data": app_d, "timestamp": ts}
         payload.append(d)
         body_d = {"installation_id": str(model.installation_id),
