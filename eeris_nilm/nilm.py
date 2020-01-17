@@ -57,6 +57,15 @@ class NILM(object):
         """
         ts = dt.datetime.now().timestamp() * 1000
         payload = []
+        # Insert background
+        app_d = {"_id": "ffffffffffffffffffffffff",
+                 "name": "Background",
+                 "type": "background",
+                 "status": True,
+                 "activePower": model.background_active,
+                 "reactivePower": 0}
+        d = {"data": app_d, "timestamp": ts}
+        payload.append(d)
         for i in range(len(model.live)):
             app = model.live[i]
             app_d = {"_id": app.appliance_id,
@@ -67,6 +76,14 @@ class NILM(object):
                      "reactivePower": app.signature[1]}
             d = {"data": app_d, "timestamp": ts}
             payload.append(d)
+        app_d = {"_id": "fffffffffffffffffffffff0",
+                 "name": "Other",
+                 "type": "residual",
+                 "status": True,
+                 "activePower": model.residual_live,
+                 "reactivePower": 0}
+        d = {"data": app_d, "timestamp": ts}
+        payload.append(d)
         body_d = {"installation_id": str(model.installation_id),
                   "payload": payload}
         body = json.dumps(body_d)
