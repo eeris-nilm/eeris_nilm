@@ -144,7 +144,7 @@ class Hart85eeris():
         self._background_active_recent = self.LARGE_POWER
         self._background_last_update = None
         self._background_recent_update = None
-        self.residual_live = None
+        self.residual_live = np.array([0.0, 0.0])
         self._count_overestimation = 0
 
         # Variables for handling threads. For now, just a lock.
