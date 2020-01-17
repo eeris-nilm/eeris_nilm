@@ -63,7 +63,7 @@ class NILM(object):
                  "type": "background",
                  "status": True,
                  "activePower": model.background_active,
-                 "reactivePower": 0}
+                 "reactivePower": 0.0}
         d = {"data": app_d, "timestamp": ts}
         payload.append(d)
         for i in range(len(model.live)):
@@ -80,8 +80,8 @@ class NILM(object):
                  "name": "Other",
                  "type": "residual",
                  "status": True,
-                 "activePower": model.residual_live,
-                 "reactivePower": 0}
+                 "activePower": model.residual_live[0],
+                 "reactivePower": model.residual_live[1]}
         d = {"data": app_d, "timestamp": ts}
         payload.append(d)
         body_d = {"installation_id": str(model.installation_id),
