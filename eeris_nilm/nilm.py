@@ -80,8 +80,8 @@ class NILM(object):
                  "name": "Other",
                  "type": "residual",
                  "status": True,
-                 "activePower": int(model.residual_live[0]),
-                 "reactivePower": int(model.residual_live[1])}
+                 "activePower": model.residual_live[0],
+                 "reactivePower": model.residual_live[1]}
         d = {"data": app_d, "timestamp": ts}
         payload.append(d)
         body_d = {"installation_id": str(model.installation_id),
