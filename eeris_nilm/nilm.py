@@ -58,11 +58,19 @@ class NILM(object):
         ts = dt.datetime.now().timestamp() * 1000
         payload = []
         # Insert background
-        app_d = {"_id": "ffffffffffffffffffffffff",
+        if model.background_active > 10000.0:
+            background = "N/A"
+            residual_active = "N/A"
+            residual_reactive = "N/A"
+        else:
+            background = model.background_active
+            residual_active = model.residual_live[0]
+            residual_reactive = model.residual_live[1]
+        app_d = {"_id": '000000000000000000000001',
                  "name": "Background",
                  "type": "background",
                  "status": True,
-                 "active": 0.0,  # model.background_active,
+                 "active": background,
                  "reactive": 0.0}
         d = {"data": app_d, "timestamp": ts}
         payload.append(d)
@@ -76,17 +84,19 @@ class NILM(object):
                      "reactive": app.signature[1]}
             d = {"data": app_d, "timestamp": ts}
             payload.append(d)
-        app_d = {"_id": "fffffffffffffffffffffff0",
+        app_d = {"_id": '000000000000000000000002',
                  "name": "Other",
                  "type": "residual",
                  "status": True,
-                 "active": 0.0,  # model.residual_live[0],
-                 "reactive": 0.0}  # model.residual_live[1]}
+                 "active": residual_active,
+                 "reactive": residual_reactive}
         d = {"data": app_d, "timestamp": ts}
         payload.append(d)
         body_d = {"installation_id": str(model.installation_id),
                   "payload": payload}
         body = json.dumps(body_d)
+        # For debugging only (use of logging package not necessary)
+        print(body)
         return body
 
     def _prepare_response_body_debug(self, model, lret=5):
@@ -179,7 +189,8 @@ class NILM(object):
         # resp.body = 'OK'
         # lret = data.shape[0]
         resp.body = self._prepare_response_body(model)
-        resp.status = falcon.HTTP_200  # Default status
+        # resp.status = falcon.HTTP_200  # Default status
+        resp.status = '200'
 
     def on_delete(self, req, resp, inst_id):
         """

@@ -16,7 +16,6 @@ limitations under the License.
 
 # Demo of edge detection without REST service implementation
 import sys
-import numpy as np
 import requests
 import json
 from eeris_nilm.datasets import eco

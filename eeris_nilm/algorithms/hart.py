@@ -834,15 +834,17 @@ class Hart85eeris():
 
         # Days since update of background and recent estimate
         # TODO Debug/check
-        if self._background_last_update is not None and self.data.shape[0] > 0:
-            days_since_update = (self.data.index[-1] -
-                                 self._background_last_update).days
+        if self._background_last_update is not None:
+            if self.data.shape[0] > 0:
+                days_since_update = (self.data.index[-1] -
+                                     self._background_last_update).days
         else:
             days_since_update = self.BACKGROUND_UPDATE_DAYS + 1
 
-        if self._background_recent_update is not None and self.data.shape[0] > 0:
-            days_recent_update = (self.data.index[-1] -
-                                  self._background_recent_update).days
+        if self._background_recent_update is not None:
+            if self.data.shape[0] > 0:
+                days_recent_update = (self.data.index[-1] -
+                                      self._background_recent_update).days
         else:
             days_recent_update = 0
 

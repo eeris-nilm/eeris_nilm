@@ -20,6 +20,7 @@ import pymongo
 import eeris_nilm.nilm
 import eeris_nilm.installation
 
+
 def create_app(dburl, dbname):
     # DB connection
     mclient = pymongo.MongoClient(dburl)
