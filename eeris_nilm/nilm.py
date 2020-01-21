@@ -58,22 +58,15 @@ class NILM(object):
         ts = dt.datetime.now().timestamp() * 1000
         payload = []
         # Insert background
-        if model.background_active > 10000.0:
-            background = "N/A"
-            residual_active = "N/A"
-            residual_reactive = "N/A"
-        else:
-            background = model.background_active
-            residual_active = model.residual_live[0]
-            residual_reactive = model.residual_live[1]
-        app_d = {"_id": '000000000000000000000001',
-                 "name": "Background",
-                 "type": "background",
-                 "status": True,
-                 "active": background,
-                 "reactive": 0.0}
-        d = {"data": app_d, "timestamp": ts}
-        payload.append(d)
+        if model.background_active < 10000.0:
+            app_d = {"_id": '000000000000000000000001',
+                     "name": "Background",
+                     "type": "background",
+                     "status": True,
+                     "active": model.background_active,
+                     "reactive": 0.0}
+            d = {"data": app_d, "timestamp": ts}
+            payload.append(d)
         for i in range(len(model.live)):
             app = model.live[i]
             app_d = {"_id": app.appliance_id,
@@ -84,14 +77,15 @@ class NILM(object):
                      "reactive": app.signature[1]}
             d = {"data": app_d, "timestamp": ts}
             payload.append(d)
-        app_d = {"_id": '000000000000000000000002',
-                 "name": "Other",
-                 "type": "residual",
-                 "status": True,
-                 "active": residual_active,
-                 "reactive": residual_reactive}
-        d = {"data": app_d, "timestamp": ts}
-        payload.append(d)
+        if model.background_active < 10000.0:
+            app_d = {"_id": '000000000000000000000002',
+                     "name": "Other",
+                     "type": "residual",
+                     "status": True,
+                     "active": model.residual_live[0],
+                     "reactive": model.residual_live[1]}
+            d = {"data": app_d, "timestamp": ts}
+            payload.append(d)
         body_d = {"installation_id": str(model.installation_id),
                   "payload": payload}
         body = json.dumps(body_d)
