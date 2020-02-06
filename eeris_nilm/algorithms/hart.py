@@ -16,7 +16,8 @@ limitations under the License.
 
 import numpy as np
 import pandas as pd
-import eeris_nilm.appliance
+from eeris_nilm import utils
+from eeris_nilm.appliance import Appliance
 import sklearn.cluster
 import sklearn.metrics.pairwise
 import threading
@@ -24,6 +25,9 @@ import logging
 import datetime
 import time
 import bson
+
+# TODO: Background has been computed on normalized data and may have discrepancies
+# from the actual background consumption (as measured through the meter)
 
 
 class Hart85eeris():
@@ -34,8 +38,6 @@ class Hart85eeris():
     # little
 
     # Some of the variables below could be parameters
-
-    NOMINAL_VOLTAGE = 230.0  # Nominal voltage value of system
     BUFFER_SIZE_SECONDS = 5 * 3600
 
     # Limiters/thresholds
@@ -47,8 +49,8 @@ class Hart85eeris():
     STEADY_SAMPLES_NUM = 7
     MATCH_THRESHOLD = 35
     MAX_MATCH_THRESHOLD_DAYS = 1
-    EDGES_CLEAN_DAYS = 2
-    STEADY_CLEAN_DAYS = 2
+    EDGES_CLEAN_DAYS = 15
+    STEADY_CLEAN_DAYS = 15
     MATCHES_CLEAN_DAYS = 6 * 30
     OVERESTIMATION_SECONDS = 20
 
@@ -60,12 +62,13 @@ class Hart85eeris():
     MIN_EDGES_STATIC_CLUSTERING = 5  # DBSCAN parameter
     LARGE_POWER = 1e6  # Large power consumption
     BACKGROUND_UPDATE_DAYS = 10  # How many days since background was updated
-    # How many days since we updated the more "recent" background
-    BACKGROUND_RECENT_DAYS = 5
 
-    def __init__(self, installation_id):
+    def __init__(self, installation_id, nominal_voltage=230.0):
         # Almost all variables are needed as class members, to support streaming
         # support.
+
+        # Power system parameters
+        self.nominal_voltage = nominal_voltage
 
         # Running state variables
 
@@ -141,9 +144,7 @@ class Hart85eeris():
 
         # Other variables - needed for sanity checks
         self.background_active = self.LARGE_POWER
-        self._background_active_recent = self.LARGE_POWER
         self._background_last_update = None
-        self._background_recent_update = None
         self.residual_live = np.array([0.0, 0.0])
         self._count_overestimation = 0
 
@@ -184,12 +185,15 @@ class Hart85eeris():
         """
         if self._buffer is None:
             # Buffer initialization
-            self._buffer = self._get_normalized_data()
+            self._buffer = utils.get_normalized_data(self._data_orig,
+                                                     nominal_voltage=self.nominal_voltage)
             assert self._start_ts is None  # Just making sure
             self._start_ts = self._data_orig.index[0]
         else:
             # Data concerning past dates update the buffer
-            self._buffer = self._buffer.append(self._get_normalized_data())
+            self._buffer = self._buffer.append(
+                utils.get_normalized_data(self._data_orig,
+                                          nominal_voltage=self.nominal_voltage))
         # Round timestamps to 1s
         self._buffer = self._buffer.sort_index()
         self._buffer.index = self._buffer.index.round('1s')
@@ -237,21 +241,6 @@ class Hart85eeris():
         self.online_edge_detected = False
         self.online_edge = np.array([0.0, 0.0])
         self.live = []
-
-    def _get_normalized_data(self):
-        """
-        Normalize power with voltage measurements.
-        """
-        # Normalization. Raise active power to 1.5 and reactive power to
-        # 2.5. See Hart's 1985 paper for an explanation.
-
-        # Copy the data to be avoid in-place weirdness
-        r_data = self._data_orig.copy()
-        r_data.loc[:, 'active'] = self._data_orig['active'] * \
-            np.power((self.NOMINAL_VOLTAGE / self._data_orig['voltage']), 1.5)
-        r_data.loc[:, 'reactive'] = self._data_orig['reactive'] * \
-            np.power((self.NOMINAL_VOLTAGE / self._data_orig['voltage']), 2.5)
-        return r_data
 
     def _detect_edges_hart(self):
         """
@@ -396,8 +385,7 @@ class Hart85eeris():
             name = 'Cluster %d' % (l)
             # TODO: Heuristics for determining appliance category
             category = 'unknown'
-            a = eeris_nilm.appliance.Appliance(
-                l, name, category, signature=centers[l, :])
+            a = Appliance(l, name, category, signature=centers[l, :])
             appliances[a.appliance_id] = a
         debug_t_end = datetime.datetime.now()
         debug_t_diff = (debug_t_end - debug_t_start)
@@ -458,7 +446,7 @@ class Hart85eeris():
             # Create the list of candidate matches for the k-th appliance
             candidates = []
             for l in a_to.keys():
-                d = eeris_nilm.appliance.Appliance.distance(a_from[k], a_to[l])
+                d = Appliance.distance(a_from[k], a_to[l])
                 if d < t:
                     candidates.append((l, d))
             if candidates:
@@ -616,8 +604,7 @@ class Hart85eeris():
             name = 'Live %s' % (str(self._appliance_display_id))
             # TODO: Determine appliance category
             category = 'unknown'
-            a = eeris_nilm.appliance.Appliance(
-                self._appliance_id, name, category, signature=e)
+            a = Appliance(self._appliance_id, name, category, signature=e)
             # Does this look like a known appliance that isn't already matched?
             candidates = self._match_appliances_live(a)
             if not candidates:
@@ -722,9 +709,7 @@ class Hart85eeris():
             # If it's already in live then ignore it
             if self._appliances_live[k] in self.live:
                 continue
-            d = eeris_nilm.appliance.Appliance.distance(
-                self._appliances_live[k], a
-            )
+            d = Appliance.distance(self._appliances_live[k], a)
             if d < t:
                 candidates.append(self._appliances_live[k])
         return candidates
@@ -816,6 +801,11 @@ class Hart85eeris():
         else:
             self._count_overestimation = 0
         self.residual_live = self.running_avg_power - total_estimated
+        if self.residual_live[0] < 0:
+            logging.debug(
+                ("Something's wrong with the residual estimation: Background: % f, \
+                 Residual: % f") % (self.background_active, self.residual_live[0]))
+            self.residual_live[0] = 0.0
 
     def _update_background(self):
         """
@@ -832,7 +822,7 @@ class Hart85eeris():
             # Return if no new values have been added.
             return
 
-        # Days since update of background and recent estimate
+        # Days since update of background
         # TODO Debug/check
         days_since_update = 0
         if self._background_last_update is not None:
@@ -842,21 +832,18 @@ class Hart85eeris():
         else:
             days_since_update = self.BACKGROUND_UPDATE_DAYS + 1
 
-        days_recent_update = 0
-        if self._background_recent_update is not None:
-            if self.data.shape[0] > 0:
-                days_recent_update = (self.data.index[-1] -
-                                      self._background_recent_update).days
-        else:
-            days_recent_update = 0
+        # Update background estimate
+        if self.background_active > background or \
+           days_since_update >= self.BACKGROUND_UPDATE_DAYS:
+            self.background_active = background
+            self._background_last_update = self.data.index[-1]
 
-        if self._background_active_recent > background or \
-           days_recent_update >= self.BACKGROUND_RECENT_DAYS:
-            self._background_active_recent = background
-            self._background_recent_update = self.data.index[-1]
-        if days_since_update >= self.BACKGROUND_UPDATE_DAYS:
-            self.background_active = self._background_active_recent
-            self._background_last_update = self._background_recent_update
+        # Hard way of dealing with discrepancies: Reset background
+        if self.background_active > self.running_avg_power[0]:
+            logging.debug(("Something's wrong with the background estimation: Background: % f, \
+                 Residual: % f") % (self.background_active, self.residual_live[0]))
+            self.background_active = self.LARGE_POWER
+            self._background_last_update = None
 
     def _guess_type(self):
         """

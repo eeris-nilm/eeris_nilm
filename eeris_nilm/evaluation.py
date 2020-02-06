@@ -15,6 +15,7 @@ limitations under the License.
 """
 
 import numpy as np
+import eeris_nilm.appliance.Appliance
 
 # TODO: Possibly also extract
 # 1. Percentage of energy identified
@@ -185,7 +186,6 @@ def jaccard_index(intervals1, intervals2):
     else:
         j_index = intersection / union
     return j_index
-
 
 
 

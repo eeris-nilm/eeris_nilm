@@ -16,7 +16,6 @@ limitations under the License.
 
 # Demo of edge detection without REST service implementation
 import sys
-# import pickle
 import dill
 import matplotlib.pyplot as plt
 import matplotlib.animation as animation

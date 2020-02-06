@@ -16,7 +16,7 @@ limitations under the License.
 
 # Demo of edge detection without REST service implementation
 import sys
-import pickle
+import dill
 import matplotlib.pyplot as plt
 import matplotlib.animation as animation
 from matplotlib.table import table
@@ -29,12 +29,12 @@ import logging
 
 class Demo(object):
     TIME_WINDOW = 1200
-    MODEL_SAVE_STEP = 20
+    MODEL_SAVE_STEP = 100
 
     def __init__(self, path, date_start, date_end, ax, axt,
                  model_path_r=None, model_path_w=None):
         # Load data
-        self.step = 5
+        self.step = 50
         self.data, self.labels = redd.read_redd(path, date_start, date_end)
         self.power = self.data['mains']
         self.xdata, self.ydata = [], []
@@ -48,7 +48,7 @@ class Demo(object):
         else:
             try:
                 with open(self.model_path_r, "rb") as fp_r:
-                    self.model = pickle.load(fp_r)
+                    self.model = dill.load(fp_r)
                 self.start_ts = self.model._last_processed_ts + \
                     datetime.timedelta(seconds=1)
             except IOError:
@@ -125,6 +125,8 @@ class Demo(object):
         else:
             cell_text = [[m.name, m.signature[0], m.signature[1]]
                          for m in self.model.live]
+        cell_text.append(['Other', self.model.residual_live[0], '-'])
+        cell_text.append(['Background', self.model.background_active, '-'])
         tab = table(self.axt, cell_text,
                     colLabels=['Appliance', 'Active', 'Reactive'],
                     cellLoc='left', colLoc='left', edges='horizontal')
@@ -143,7 +145,7 @@ class Demo(object):
         if self.model_path_w and \
            (self.save_counter % self.MODEL_SAVE_STEP == 0):
             with open(self.model_path_w, "wb") as fp:
-                pickle.dump(self.model, fp)
+                dill.dump(self.model, fp)
         self.save_counter += 1
         return self.line_active, \
             self.line_est, \
@@ -153,15 +155,17 @@ class Demo(object):
 logging.basicConfig(level=logging.DEBUG)
 
 # Setup
-# p = '/media/data/datasets/NILM/ECO/02_sm_csv/02'
 p = 'tests/data/house_1'
+# For debugging
+p = 'tests/data/house_1_short'
+
 date_start = '2011-04-18T00:00'
 date_end = '2011-04-30T23:59'
 fig = plt.figure(figsize=(19.2, 10.8), dpi=100)
 ax = plt.subplot(2, 1, 1)
 axt = plt.subplot(2, 1, 2)
-model_path_r = 'tests/data/model_redd.pickle'
-model_path_w = 'tests/data/model_redd.pickle'
+model_path_r = 'tests/data/model_redd.dill'
+model_path_w = 'tests/data/model_redd.dill'
 d = Demo(p, date_start, date_end, ax, axt, model_path_r=model_path_r,
          model_path_w=model_path_w)
 ani = animation.FuncAnimation(fig, d, frames=d.data_gen,

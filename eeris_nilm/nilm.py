@@ -77,7 +77,8 @@ class NILM(object):
                      "reactive": app.signature[1]}
             d = {"data": app_d, "timestamp": ts}
             payload.append(d)
-        if model.background_active < 10000.0:
+        # We ignore residuals under 5 Watts.
+        if model.residual_live[0] > 5.0 and model.background_active < 10000:
             app_d = {"_id": '000000000000000000000002',
                      "name": "Other",
                      "type": "residual",
