@@ -836,7 +836,8 @@ class Hart85eeris():
         if self.background_active > background or \
            days_since_update >= self.BACKGROUND_UPDATE_DAYS:
             self.background_active = background
-            self._background_last_update = self.data.index[-1]
+            if self.data.shape[0] > 0:
+                self._background_last_update = self.data.index[-1]
 
         # Hard way of dealing with discrepancies: Reset background
         if self.background_active > self.running_avg_power[0]:
