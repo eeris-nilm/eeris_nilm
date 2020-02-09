@@ -52,7 +52,7 @@ class Hart85eeris():
     EDGES_CLEAN_DAYS = 15
     STEADY_CLEAN_DAYS = 15
     MATCHES_CLEAN_DAYS = 6 * 30
-    OVERESTIMATION_SECONDS = 20
+    OVERESTIMATION_SECONDS = 10
 
     # For clustering
     # TODO: Check the clustering values
@@ -365,9 +365,9 @@ class Hart85eeris():
         self._lock.release()
         debug_t_start = datetime.datetime.now()
         logging.debug('Initiating static clustering at %s' % debug_t_start)
-        d = sklearn.cluster.DBSCAN(eps=30, min_samples=3, metric='euclidean',
-                                   metric_params=None, algorithm='auto',
-                                   leaf_size=30)
+        d = sklearn.cluster.DBSCAN(eps=self.MATCH_THRESHOLD, min_samples=3,
+                                   metric='euclidean', metric_params=None,
+                                   algorithm='auto', leaf_size=30)
         d.fit(matches)
         # DBSCAN only: How many clusters are there? Can we derive "centers"?
         u_labels = np.unique(d.labels_[d.labels_ >= 0])
@@ -410,7 +410,7 @@ class Hart85eeris():
         logging.debug(str(self._appliances))
         self._lock.release()
 
-    def _match_appliances(self, a_from, a_to, t=20):
+    def _match_appliances(self, a_from, a_to, t=35.0):
         """
         Helper function to match between two dictionaries of appliances.
 
@@ -552,8 +552,8 @@ class Hart85eeris():
                 if (e.iloc[j]['start'] - e.iloc[i]['end']).days > \
                    self.MAX_MATCH_THRESHOLD_DAYS:
                     continue
-                # Do they match?
-                e2 = e.iloc[j][['active', 'reactive']].values.astype(np.float64)
+                # Do they match (take negative of edge, since it is the negative part)?
+                e2 = -e.iloc[j][['active', 'reactive']].values.astype(np.float64)
                 if self._match_power(e1, e2):
                     # Match
                     edge = (np.fabs(e1) + np.fabs(e2)) / 2.0
@@ -623,7 +623,7 @@ class Hart85eeris():
         matched = False
         for i in range(len(self.live)):
             e0 = self.live[i].signature
-            if self._match_power(e0, e):
+            if self._match_power(e0, -e):
                 self.live.pop(i)
                 matched = True
                 break
@@ -640,14 +640,16 @@ class Hart85eeris():
         for app in self.live:
             app.update_appliance_live()
 
-    def _match_power(self, p1, p2):
+    def _match_power(self, p1, p2, active_only=True):
         """
         Match power consumption p1 against p2 according to Hart's algorithm.
 
         Parameters
         ----------
 
-        p1, p2 : Numpy arrays with two elements (active and reactive power)
+        p1, p2 : Numpy arrays with two elements (active and reactive power).
+        active_only : Boolean indicating if match should take into account only active
+        power or both active and reactive power
 
         Returns
         -------
@@ -666,25 +668,16 @@ class Hart85eeris():
             t_reactive = self.MATCH_THRESHOLD
         T = np.fabs(np.array([t_active, t_reactive]))
         # Match only with active power for now
-        if np.fabs(np.fabs(p2[0]) - np.fabs(p1[0])) < T[0]:
-            # Match
-            return True
+        if active_only:
+            if np.fabs(p2[0] - p1[0]) < T[0]:
+                # Match
+                return True
         else:
-            return False
+            if all(np.fabs(p2 - p1) < T):
+                return True
+        return False
 
-    # def _negative_no_match_live(self):
-    #     """
-    #     If we have a negative edge without a match.
-    #     """
-    #     e = self.online_edge
-    #     # Redundant check (if we are here it should never evaluate to true).
-    #     if all(np.fabs(e) < self.SIGNIFICANT_EDGE) or e[0] > 0.0:
-    #         return
-    #     # Check if the last two edges are close and we can merge them to find
-    #     # a match.
-    #     if self.edges
-
-    def _match_appliances_live(self, a, t=20):
+    def _match_appliances_live(self, a, t=35.0):
         """
         Helper function to match an online detected appliance against a list of
         appliances.
@@ -709,9 +702,13 @@ class Hart85eeris():
             # If it's already in live then ignore it
             if self._appliances_live[k] in self.live:
                 continue
-            d = Appliance.distance(self._appliances_live[k], a)
-            if d < t:
+            if self._match_power(self._appliances_live[k].signature, a.signature,
+                                 active_only=False):
                 candidates.append(self._appliances_live[k])
+            # TODO: Alternative approach (evaluate):
+            # d = Appliance.distance(self._appliances_live[k], a)
+            # if d < t:
+            #     candidates.append(self._appliances_live[k])
         return candidates
 
     def _match_helper(self, start, end, active):
@@ -789,7 +786,8 @@ class Hart85eeris():
         for a in self.live:
             total_estimated += a.signature
         total_estimated += self.background_active
-        if self.running_avg_power[0] < total_estimated[0]:
+        # Allow for 10% error in edge estimation
+        if self.running_avg_power[0] < 0.9*total_estimated[0]:
             # We may have made a matching error, and an appliance should have
             # been switched off. Heuristic solution here.
             # self.live = []
@@ -857,7 +855,7 @@ class Hart85eeris():
         Wrapper to sequence of operations for model update. Normally, this the
         only function anyone will need to call to use the model.
         """
-        # Thread-safe
+        # For thread safety
         self._lock.acquire()
         if data is not None:
             self.data = data
@@ -891,7 +889,7 @@ class Hart85eeris():
             td = self._last_processed_ts - self._start_ts
         self._lock.release()
 
-        if td.days > self.CLUSTER_STEP_DAYS:
+        if td.days >= self.CLUSTER_STEP_DAYS:
             if (self._clustering_thread is None) or \
                (not self._clustering_thread.is_alive()):
                 self._clustering_thread = \

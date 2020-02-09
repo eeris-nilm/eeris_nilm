@@ -20,9 +20,9 @@ import numpy as np
 from numpy import linalg as LA
 import scipy.signal
 import sklearn.cluster
+import logging
 
 # TODO: What happens with variable consumption appliances?
-
 
 class Appliance():
     """

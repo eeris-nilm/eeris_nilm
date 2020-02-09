@@ -34,7 +34,7 @@ class Demo(object):
     def __init__(self, path, date_start, date_end, ax, axt,
                  model_path_r=None, model_path_w=None):
         # Load data
-        self.step = 50
+        self.step = 5
         self.data, self.labels = redd.read_redd(path, date_start, date_end)
         self.power = self.data['mains']
         self.xdata, self.ydata = [], []
@@ -157,9 +157,9 @@ logging.basicConfig(level=logging.DEBUG)
 # Setup
 p = 'tests/data/house_1'
 # For debugging
-p = 'tests/data/house_1_short'
+# p = 'tests/data/house_1_short'
 
-date_start = '2011-04-18T00:00'
+date_start = '2011-04-18T01:00'
 date_end = '2011-04-30T23:59'
 fig = plt.figure(figsize=(19.2, 10.8), dpi=100)
 ax = plt.subplot(2, 1, 1)
