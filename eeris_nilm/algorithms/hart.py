@@ -604,6 +604,8 @@ class Hart85eeris(object):
             # If it's already in live then ignore it
             if self.appliances_live[k] in self.live:
                 continue
+            # Assumes two-state appliances.
+            # TODO: Use Appliance.compare_power() in the future.
             match, d = utils.match_power(self.appliances_live[k].signature,
                                          a.signature, active_only=False,
                                          t=self.MATCH_THRESHOLD)

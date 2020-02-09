@@ -23,11 +23,13 @@ import sklearn.cluster
 
 
 # TODO: What happens with variable consumption appliances?
+# TODO: Code needs refactoring
 class Appliance(object):
     """
     Unsupervised appliance model. Includes signatures, usage data and statistics
     as well as other data useful for identification through NILM.
     """
+    MATCH_THRESHOLD = 35.0
 
     def __init__(self, appliance_id, name, category, signature=None,
                  nominal_voltage=230.0):
@@ -75,10 +77,11 @@ class Appliance(object):
 
     def signature_from_data(self, data):
         """
-        Given active (and, possibly, reactive) recorded data from an appliance (e.g., data
-        from a smart plug), this function computes the appliance signature. If a 'voltage'
-        column is available, it is used for data normalization purposes. Segmentation to
-        determine consumption levels is only done on active power data.
+        Given active (and, possibly, reactive) recorded data from an appliance
+        (e.g., data from a smart plug), this function computes the appliance
+        signature. If a 'voltage' column is available, it is used for data
+        normalization purposes. Segmentation to determine consumption levels is
+        only done on active power data.
 
         Parameters
         ----------
@@ -86,10 +89,11 @@ class Appliance(object):
         'active' and, optionally, 'reactive' and 'voltage'.
 
         """
-        # TODO: This function works with steady-states. This may not work in variable
-        # consumption appliances. Also, Hart's algorithm works on matched edges. If this
-        # approach is not effective then we can apply Hart's algorithm in each appliance
-        # separately and perform matching on the edges as usual.
+        # TODO: This function works with steady-states. This may not work in
+        # variable consumption appliances. Also, Hart's algorithm works on
+        # matched edges. If this approach is not effective then we can apply
+        # Hart's algorithm in each appliance separately and perform matching on
+        # the edges as usual.
 
         # TODO: Exception?
         if 'active' not in data.columns:
@@ -105,7 +109,8 @@ class Appliance(object):
             data_n = data_n[['active', 'reactive']]
         else:
             data_n = data_n[['active']]
-        # Pre-process data to a constant sampling rate, and fill-in missing data.
+        # Pre-process data to a constant sampling rate, and fill-in missing
+        # data.
         data_n = utils.preprocess_data(data_n)
         # Work with numpy data from now on.
         npdata = data_n.values
@@ -138,6 +143,97 @@ class Appliance(object):
         self.signature = centers
         self.num_states = centers.shape[0]
 
+    def compare_power(a1, a2, t):
+        """
+        Helper function to see if two appliances are similar, by comparing all
+        power consumption states states.
+
+        Parameters
+        ----------
+        a1 : eeris_nilm.appliance.Appliance object
+
+        a2 : eeris_nilm.appliance.Appliance object
+
+        t : Float
+        Beyond this threshold the devices are considered different (same value
+        used for active and reactive power)
+
+        Returns
+        -------
+
+        match : bool
+        Appliances match (True) or not (False)
+        """
+        # TODO: This is greedy. Is it OK? Leave it like this for now
+        s1 = np.copy(a1.signature)
+        s2 = np.copy(a2.signature)
+        if s1.shape[0] != s2.shape[0]:
+            raise ValueError(("Appliances must have the same number of"
+                              "states for full match"))
+        matched1 = np.zeros((s1.shape[0], 1), dtype=bool)
+        matched2 = np.zeros((s2.shape[0], 1), dtype=bool)
+        for i in range(len(s1.shape[0])):
+            best_match = -1
+            distance = 1e10
+            for j in range(len(s2.shape[0])):
+                # Greedy approach
+                if matched2[j]:
+                    continue
+                p1 = a1.signature[i, :]
+                p2 = a2.signature[j, :]
+                match, d = utils.match_power(p1, p2, active_only=False)
+                if d < distance:
+                    best_match = j
+                if match:
+                    matched1[i] = True
+            if matched1[i]:
+                matched2[best_match] = True
+        if all(matched1) and all(matched2):
+            return True
+        else:
+            return False
+
+    def match_power_state(a1, a2, t):
+        """
+        Helper function to see if the 'on' state of a two-state appliance is
+        matched with some state of a multi-state appliance
+
+        Parameters
+        ----------
+        a1 : eeris_nilm.appliance.Appliance object. Only the first state is
+        considered (even if it has more than one).
+
+        a2 : eeris_nilm.appliance.Appliance object
+
+        t : Float
+        Beyond this threshold the devices are considered different (same value
+        used for active and reactive power)
+
+        Returns
+        -------
+
+        match : bool
+        True if some state matches
+        distance : float
+        Distance of closest state
+        index : int
+        Index of closest state (row of the signature matrix)
+        """
+        # TODO: This is greedy. Is it OK? Leave it like this for now
+        s1 = np.copy(a1.signature)
+        s2 = np.copy(a2.signature)
+        matched = False
+        distance = 1e10
+        index = -1
+        for i in range(len(s2.shape[0])):
+            match, d = utils.match_power(s1[0, :], s2[i, :], active_only=False)
+            if match:
+                matched = True
+                if d < distance:
+                    distance = d
+                    index = i
+        return matched, distance, index
+
     def match_appliances(a_from, a_to, t=35.0):
         """
         Helper function to match between two dictionaries of appliances.
@@ -164,6 +260,9 @@ class Appliance(object):
         changing their appliance_id).
 
         """
+        # TODO: Works only for two-state appliances, assuming signature encodes
+        # only the 'On' state
+        #
         # TODO: This is a greedy implementation with many to one mapping. Is
         # this correct? Could an alternative strategy be better instead? To
         # support this, we keep the list of all candidates in the current
@@ -174,7 +273,9 @@ class Appliance(object):
             # Create the list of candidate matches for the k-th appliance
             candidates = []
             for l in a_to.keys():
-                match, d = utils.match_power(a_from[k], a_to[l],
+                # Works only for two-state appliances
+                match, d = utils.match_power(a_from[k].signature[0, :],
+                                             a_to[l].signature[0, :],
                                              active_only=False, t=t)
                 if match:
                     candidates.append((l, d))
