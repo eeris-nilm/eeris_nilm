@@ -17,7 +17,7 @@ limitations under the License.
 import numpy as np
 import pandas as pd
 from eeris_nilm import utils
-from eeris_nilm.appliance import Appliance
+from eeris_nilm import appliance
 import sklearn.cluster
 import sklearn.metrics.pairwise
 import threading
@@ -26,11 +26,12 @@ import datetime
 import time
 import bson
 
-# TODO: Background has been computed on normalized data and may have discrepancies
-# from the actual background consumption (as measured through the meter)
+# TODO: Background has been computed on normalized data and may have
+# discrepancies from the actual background consumption (as measured through the
+# meter)
 
 
-class Hart85eeris():
+class Hart85eeris(object):
     """ Modified implementation of Hart's NILM algorithm. """
     # TODO:
     # - remove the class variables that are not needed
@@ -139,8 +140,8 @@ class Hart85eeris():
         # This could simply be the appliance id instead of bson.objectid
         self._appliance_display_id = 0
         # Dictionaries of known appliances
-        self._appliances = {}
-        self._appliances_live = {}
+        self.appliances = {}
+        self.appliances_live = {}
 
         # Other variables - needed for sanity checks
         self.background_active = self.LARGE_POWER
@@ -183,10 +184,12 @@ class Hart85eeris():
         BUFFER_SIZE_SECONDS of data. Current version resamples to 1Hz sampling
         frequency.
         """
+        # TODO: What about NAs? Apply dropna?
         if self._buffer is None:
             # Buffer initialization
-            self._buffer = utils.get_normalized_data(self._data_orig,
-                                                     nominal_voltage=self.nominal_voltage)
+            self._buffer = \
+                utils.get_normalized_data(self._data_orig,
+                                          nominal_voltage=self.nominal_voltage)
             assert self._start_ts is None  # Just making sure
             self._start_ts = self._data_orig.index[0]
         else:
@@ -194,20 +197,13 @@ class Hart85eeris():
             self._buffer = self._buffer.append(
                 utils.get_normalized_data(self._data_orig,
                                           nominal_voltage=self.nominal_voltage))
-        # Round timestamps to 1s
-        self._buffer = self._buffer.sort_index()
-        self._buffer.index = self._buffer.index.round('1s')
-        # Remove possible duplicate entries (keep the last entry), based on
-        # timestamp
-        self._buffer = self._buffer.reset_index()
-        self._buffer = self._buffer.drop_duplicates(subset='index', keep='last')
-        self._buffer = self._buffer.set_index('index')
-        # Keep only the last BUFFER_SIZE_SECONDS of the buffer
+        # Data pre-processing (remove duplicates, resample to 1s)
+        self._buffer = utils.preprocess_data(self._buffer)
+        # Keep only the last BUFFER_SIZE_SECONDS of the buffer. Should this be
+        # done before preprocesssing?
         start_ts = self._buffer.index[-1] - \
             pd.offsets.Second(self.BUFFER_SIZE_SECONDS - 1)
         self._buffer = self._buffer.loc[self._buffer.index >= start_ts]
-        # Resample to 1s, filling-in gaps.
-        self._buffer = self._buffer.asfreq('1S', method='pad')
         if self._last_processed_ts is None:
             # We're just starting
             self._data = self._buffer
@@ -385,7 +381,7 @@ class Hart85eeris():
             name = 'Cluster %d' % (l)
             # TODO: Heuristics for determining appliance category
             category = 'unknown'
-            a = Appliance(l, name, category, signature=centers[l, :])
+            a = appliance.Appliance(l, name, category, signature=centers[l, :])
             appliances[a.appliance_id] = a
         debug_t_end = datetime.datetime.now()
         debug_t_diff = (debug_t_end - debug_t_start)
@@ -393,90 +389,24 @@ class Hart85eeris():
         logging.debug('Total clustering time: %s seconds' %
                       (debug_t_diff.seconds))
         self._lock.acquire()
-        if not self._appliances:
+        if not self.appliances:
             # First time we detect appliances
-            self._appliances = appliances
+            self.appliances = appliances
         else:
             # Map to previous
-            self._appliances = self._match_appliances(appliances,
-                                                      self._appliances)
+            self.appliances = \
+                appliance.Appliance.match_appliances(appliances,
+                                                     self.appliances)
         # Sync live appliances
-        self._appliances_live = self._match_appliances(self._appliances_live,
-                                                       self._appliances)
+        self.appliances_live = \
+            appliance.Appliance.match_appliances(self.appliances_live,
+                                                 self.appliances)
         # Set timestamp
         self._last_clustering_ts = self._buffer.index[-1]
 
         logging.debug('Clustering complete. Current list of appliances:')
-        logging.debug(str(self._appliances))
+        logging.debug(str(self.appliances))
         self._lock.release()
-
-    def _match_appliances(self, a_from, a_to, t=35.0):
-        """
-        Helper function to match between two dictionaries of appliances.
-
-        Parameters
-        ----------
-        a_from : Dictionary of eeris_nilm.appliance.Appliance objects that we
-        need to map from
-
-        a_to : Dictionary of eeris_nilm.appliance.Appliance objects that we need
-        to map to
-
-        t : Beyond this threshold the devices are considered different
-
-        Returns
-        -------
-
-        out : A dictionary of the form { appliance_id: appliance } where
-        appliance is an eeris_nilm.appliance.Appliance object and appliance_id
-        is the id of the appliance. This function maps the appliances in a_from
-        to a_to i.e., adjusts the appliance_id for the appliances that are
-        considered the same in a_from and a_to, keeping the ids of a_to. The
-        dictionary also includes appliances that were not mapped (without
-        changing their appliance_id).
-
-        """
-        # TODO: This is a greedy implementation with many to one mapping. Is
-        # this correct? Could an alternative strategy be better instead? To
-        # support this, we keep the list of all candidates in the current
-        # implementation.
-        a = dict()
-        mapping = dict()
-        for k in a_from.keys():
-            # Create the list of candidate matches for the k-th appliance
-            candidates = []
-            for l in a_to.keys():
-                d = Appliance.distance(a_from[k], a_to[l])
-                if d < t:
-                    candidates.append((l, d))
-            if candidates:
-                candidates.sort(key=lambda x: x[1])
-                # Simplest approach. Just get the minimum that is below
-                # threshold t
-                #
-                # If we want to avoid mapping to an already mapped appliance,
-                # then do this:
-                # m = 0
-                # while m < len(candidates) and candidates[m][0] in \
-                # mapping.keys():
-                # m += 1
-                # if m < len(candidates):
-                #     mapping[k] = candidates[m][0]
-                #
-                # For now we keep it simple and do this instead:
-                mapping[k] = candidates[0][0]
-        # Finally, perform the mapping. This loop assumes that keys in both
-        # lists are unique (as is the case with appliances created in this
-        # class).
-        # TODO: Perform uniqueness checks!
-        for k in a_from.keys():
-            if k in mapping.keys():
-                m = mapping[k]
-                a[m] = a_to[m]
-            else:
-                # Unmapped new appliances
-                a[k] = a_from[k]
-        return a
 
     def _clean_buffers(self):
         """
@@ -552,9 +482,13 @@ class Hart85eeris():
                 if (e.iloc[j]['start'] - e.iloc[i]['end']).days > \
                    self.MAX_MATCH_THRESHOLD_DAYS:
                     continue
-                # Do they match (take negative of edge, since it is the negative part)?
-                e2 = -e.iloc[j][['active', 'reactive']].values.astype(np.float64)
-                if self._match_power(e1, e2):
+                # Do they match? (use negative of edge, since it is the negative
+                # part)
+                e2 = -e.iloc[j][['active', 'reactive']].\
+                    values.astype(np.float64)
+                match, d = utils.match_power(e1, e2, active_only=True,
+                                             t=self.MATCH_THRESHOLD)
+                if match:
                     # Match
                     edge = (np.fabs(e1) + np.fabs(e2)) / 2.0
                     # Ideally we should keep both start and end times for each
@@ -604,26 +538,29 @@ class Hart85eeris():
             name = 'Live %s' % (str(self._appliance_display_id))
             # TODO: Determine appliance category
             category = 'unknown'
-            a = Appliance(self._appliance_id, name, category, signature=e)
+            a = appliance.Appliance(self._appliance_id, name, category,
+                                    signature=e)
             # Does this look like a known appliance that isn't already matched?
             candidates = self._match_appliances_live(a)
             if not candidates:
                 # New appliance. Add to live dictionary using id as key.
-                self._appliances_live[a.appliance_id] = a
+                self.appliances_live[a.appliance_id] = a
                 self.live.insert(0, a)
                 self._appliance_id = str(bson.objectid.ObjectId())
                 # Increase display id for next appliance
                 self._appliance_display_id += 1
             else:
                 # Match with previous
-                self.live.insert(0, candidates[0])
+                self.live.insert(0, candidates[0][0])
             # Done
             return
         # Appliance cycle stop. Does it match against previous edges?
         matched = False
         for i in range(len(self.live)):
             e0 = self.live[i].signature
-            if self._match_power(e0, -e):
+            match, d = utils.match_power(e0, -e, active_only=True,
+                                         t=self.MATCH_THRESHOLD)
+            if match:
                 self.live.pop(i)
                 matched = True
                 break
@@ -639,43 +576,6 @@ class Hart85eeris():
         # Make sure all previous appliances are finalized
         for app in self.live:
             app.update_appliance_live()
-
-    def _match_power(self, p1, p2, active_only=True):
-        """
-        Match power consumption p1 against p2 according to Hart's algorithm.
-
-        Parameters
-        ----------
-
-        p1, p2 : Numpy arrays with two elements (active and reactive power).
-        active_only : Boolean indicating if match should take into account only active
-        power or both active and reactive power
-
-        Returns
-        -------
-
-        out : Boolean for match (True) or no match (False)
-
-        """
-        # Can be positive or negative edge
-        if np.fabs(p2[0]) >= 1000:
-            t_active = 0.05 * p2[0]
-        else:
-            t_active = self.MATCH_THRESHOLD
-        if np.fabs(p2[1]) >= 1000:
-            t_reactive = 0.05 * p2[1]
-        else:
-            t_reactive = self.MATCH_THRESHOLD
-        T = np.fabs(np.array([t_active, t_reactive]))
-        # Match only with active power for now
-        if active_only:
-            if np.fabs(p2[0] - p1[0]) < T[0]:
-                # Match
-                return True
-        else:
-            if all(np.fabs(p2 - p1) < T):
-                return True
-        return False
 
     def _match_appliances_live(self, a, t=35.0):
         """
@@ -697,18 +597,24 @@ class Hart85eeris():
         _appliances_live dictionary
 
         """
+        # TODO: Replace the use of this function with a call to
+        # appliances.match_appliances.
         candidates = []
-        for k in self._appliances_live.keys():
+        for k in self.appliances_live.keys():
             # If it's already in live then ignore it
-            if self._appliances_live[k] in self.live:
+            if self.appliances_live[k] in self.live:
                 continue
-            if self._match_power(self._appliances_live[k].signature, a.signature,
-                                 active_only=False):
-                candidates.append(self._appliances_live[k])
+            match, d = utils.match_power(self.appliances_live[k].signature,
+                                         a.signature, active_only=False,
+                                         t=self.MATCH_THRESHOLD)
+            if match:
+                candidates.append((self.appliances_live[k], d))
             # TODO: Alternative approach (evaluate):
-            # d = Appliance.distance(self._appliances_live[k], a)
+            # d = Appliance.distance(self.appliances_live[k], a)
             # if d < t:
-            #     candidates.append(self._appliances_live[k])
+            #     candidates.append(self.appliances_live[k])
+        if candidates:
+            candidates.sort(key=lambda x: x[1])
         return candidates
 
     def _match_helper(self, start, end, active):
@@ -800,9 +706,9 @@ class Hart85eeris():
             self._count_overestimation = 0
         self.residual_live = self.running_avg_power - total_estimated
         if self.residual_live[0] < 0:
-            logging.debug(
-                ("Something's wrong with the residual estimation: Background: % f, \
-                 Residual: % f") % (self.background_active, self.residual_live[0]))
+            logging.debug(("Something's wrong with the residual estimation:"
+                           "Background: %f, Residual: %f") %
+                          (self.background_active, self.residual_live[0]))
             self.residual_live[0] = 0.0
 
     def _update_background(self):
@@ -839,8 +745,9 @@ class Hart85eeris():
 
         # Hard way of dealing with discrepancies: Reset background
         if self.background_active > self.running_avg_power[0]:
-            logging.debug(("Something's wrong with the background estimation: Background: % f, \
-                 Residual: % f") % (self.background_active, self.residual_live[0]))
+            logging.debug(("Something's wrong with the background estimation:"
+                           "Background: %f, Residual: %f") %
+                          (self.background_active, self.residual_live[0]))
             self.background_active = self.LARGE_POWER
             self._background_last_update = None
 

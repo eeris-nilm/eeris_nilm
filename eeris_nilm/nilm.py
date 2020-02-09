@@ -19,6 +19,7 @@ import pandas as pd
 import datetime as dt
 import dill
 import json
+import logging
 
 from eeris_nilm.algorithms import hart
 
@@ -89,7 +90,15 @@ class NILM(object):
             payload.append(d)
         body_d = {"installation_id": str(model.installation_id),
                   "payload": payload}
-        body = json.dumps(body_d)
+        try:
+            body = json.dumps(body_d)
+        except (ValueError, TypeError):
+            logging.debug(body_d['installation_id'])
+            logging.debug(body_d['payload'])
+            for k in body_d['payload']:
+                logging.debug(body_d[k])
+            raise
+
         # For debugging only (use of logging package not necessary)
         print(body)
         return body

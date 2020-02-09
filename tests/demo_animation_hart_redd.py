@@ -35,7 +35,8 @@ class Demo(object):
                  model_path_r=None, model_path_w=None):
         # Load data
         self.step = 5
-        self.data, self.labels = redd.read_redd(path, date_start, date_end)
+        self.data, self.labels = redd.read_redd(path, date_start, date_end,
+                                                get_channels=False)
         self.power = self.data['mains']
         self.xdata, self.ydata = [], []
         self.ymatch = None

@@ -57,7 +57,7 @@ def read_redd(path, date_start=None, date_end=None, get_channels=True):
                          names=['label'])
     data = {}
     for ch, la in labels.iterrows():
-        if get_channels is False and la != 'mains':
+        if get_channels is False and la['label'] != 'mains':
             continue
         print('Loading channel %d (%s)' % (ch, la['label']))
         filepath = os.path.join(path, ('channel_%d.dat') % ch)
