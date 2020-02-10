@@ -58,9 +58,12 @@ class NILM(object):
         """
         # ts = dt.datetime.now().timestamp() * 1000
         if model.last_processed_ts is not None:
-            ts = model.last_processed_ts
+            ts = model.last_processed_ts.timestamp() * 1000
         else:
-            return {}
+            payload = []
+            body_d = {"installation_id": str(model.installation_id),
+                      "payload": payload}
+            return json.dumps(body_d)
         payload = []
         # Insert background
         if model.background_active < 10000.0:
