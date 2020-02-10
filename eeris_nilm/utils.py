@@ -143,6 +143,11 @@ def match_power(p1, p2, active_only=True, t=35.0):
     case of active_only=True or L2 distance in case active_only=False.
 
     """
+    # TODO: Check and enforce signature shapes
+    if len(p1.shape) > 1 and all(p1.shape > 1):
+        p1 = p1[0]
+    if len(p2.shape) > 1 and all(p2.shape > 1):
+        p2 = p2[0]
     if p1[0] < 0.0 or p2[0] < 0.0:
         raise ValueError('Active power must be positive')
     if max((p1[0], p2[0])) >= 1000:

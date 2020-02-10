@@ -56,7 +56,11 @@ class NILM(object):
         Prepare a response according to the specifications of Cenote.
         Check https://authecesofteng.github.io/cenote/ for more information.
         """
-        ts = dt.datetime.now().timestamp() * 1000
+        # ts = dt.datetime.now().timestamp() * 1000
+        if model.last_processed_ts is not None:
+            ts = model.last_processed_ts
+        else:
+            return {}
         payload = []
         # Insert background
         if model.background_active < 10000.0:

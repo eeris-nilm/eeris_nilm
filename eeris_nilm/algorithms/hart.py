@@ -52,13 +52,13 @@ class Hart85eeris(object):
     MAX_MATCH_THRESHOLD_DAYS = 1
     EDGES_CLEAN_DAYS = 15
     STEADY_CLEAN_DAYS = 15
-    MATCHES_CLEAN_DAYS = 6 * 30
+    MATCHES_CLEAN_DAYS = 3 * 365   # Unused for now
     OVERESTIMATION_SECONDS = 10
 
     # For clustering
     # TODO: Check the clustering values
-    CLUSTER_STEP_DAYS = 1.0  # Update every day
-    CLUSTER_FIRST_DAYS = 3.0  # Period before first clustering
+    CLUSTER_STEP_DAYS = 1  # Update every day
+    CLUSTER_FIRST_DAYS = 1  # Period before first clustering
     CLUSTER_DATA_DAYS = 30 * 3  # Use last 3 months for clustering
     MIN_EDGES_STATIC_CLUSTERING = 5  # DBSCAN parameter
     LARGE_POWER = 1e6  # Large power consumption
@@ -86,7 +86,7 @@ class Hart85eeris(object):
         # Dynamic steady power estimate
         self.running_avg_power = np.array([0.0, 0.0])
         # Timestamp of last processed sample
-        self._last_processed_ts = None
+        self.last_processed_ts = None
         # To save some computations if no edge was detected
         self._edge_detected = False
 
@@ -131,13 +131,13 @@ class Hart85eeris(object):
         # For online edge detection
         self.online_edge_detected = False
         self.online_edge = np.array([0.0, 0.0])
+
         # List of live appliances
         self.live = []
         # Current live appliance id.
-        # NOTE: I don't find using bson object ids is a good practice. Doing
-        # this due to integration requirements by other eeRIS modules.
+        # NOTE: bson object ids are not necessary here. They are used due to
+        # integration requirements by other eeRIS modules.
         self._appliance_id = str(bson.objectid.ObjectId())
-        # This could simply be the appliance id instead of bson.objectid
         self._appliance_display_id = 0
         # Dictionaries of known appliances
         self.appliances = {}
@@ -204,21 +204,21 @@ class Hart85eeris(object):
         start_ts = self._buffer.index[-1] - \
             pd.offsets.Second(self.BUFFER_SIZE_SECONDS - 1)
         self._buffer = self._buffer.loc[self._buffer.index >= start_ts]
-        if self._last_processed_ts is None:
+        if self.last_processed_ts is None:
             # We're just starting
             self._data = self._buffer
             self._idx = self._buffer.index[0]
             self._steady_start_ts = self._idx
-        elif self._last_processed_ts < self._buffer.index[0]:
+        elif self.last_processed_ts < self._buffer.index[0]:
             # After a big gap, reset everything
-            self._last_processed_ts = self._buffer.index[0]
-            self._idx = self._last_processed_ts
+            self.last_processed_ts = self._buffer.index[0]
+            self._idx = self.last_processed_ts
             self._data = self._buffer
             self._reset()
         else:
             # Normal operation: Just get the data that has not been previously
             # been processed
-            self._idx = self._last_processed_ts + 1 * self._buffer.index.freq
+            self._idx = self.last_processed_ts + 1 * self._buffer.index.freq
             self._data = self._buffer.loc[self._idx:]
         # TODO: Handle N/As and zero voltage.
         # TODO: Unit tests with all the unusual cases
@@ -245,12 +245,12 @@ class Hart85eeris(object):
         self._edge_detected = False
         self.online_edge_detected = False
         self.online_edge = np.array([0.0, 0.0])
-        if self._last_processed_ts is None:
+        if self.last_processed_ts is None:
             data = self._buffer[['active', 'reactive']].values
             prev = data[0, :]
         else:
             tmp_df = self._buffer[['active', 'reactive']]
-            prev = tmp_df.loc[self._last_processed_ts].values
+            prev = tmp_df.loc[self.last_processed_ts].values
             data = tmp_df.loc[self._idx:].values
         # These are helper variables, to have a single np.concatenate/vstack at
         # the end
@@ -328,7 +328,7 @@ class Hart85eeris(object):
         self._edges = pd.concat(edge_list, ignore_index=True)
         self._steady_states = pd.concat(steady_list, ignore_index=True)
         # Update last processed
-        self._last_processed_ts = self._buffer.index[-1]
+        self.last_processed_ts = self._buffer.index[-1]
 
     def _static_cluster(self):
         """
@@ -346,12 +346,13 @@ class Hart85eeris(object):
         self._lock.acquire()
         # Select matched edges to use for clustering
         matches = self._matches.copy()
-        matches = matches[['start', 'active', 'reactive']]
+        matches = matches[['start', 'end', 'active', 'reactive']]
         if len(matches) < self.MIN_EDGES_STATIC_CLUSTERING:
             return
         start_ts = matches['start'].iloc[-1] - \
             pd.offsets.Day(self.CLUSTER_DATA_DAYS)
         matches = matches.loc[matches['start'] > start_ts]
+        matches1 = matches.copy()
         matches = matches[['active', 'reactive']].values
         # Apply DBSCAN.
         # TODO: Experiment on the options.
@@ -382,6 +383,9 @@ class Hart85eeris(object):
             # TODO: Heuristics for determining appliance category
             category = 'unknown'
             a = appliance.Appliance(l, name, category, signature=centers[l, :])
+            ml = matches1.iloc[d.labels_ == l, :]
+            a.activations.append(ml[['start', 'end', 'active']],
+                                 ignore_index=True, sort=True)
             appliances[a.appliance_id] = a
         debug_t_end = datetime.datetime.now()
         debug_t_diff = (debug_t_end - debug_t_start)
@@ -396,11 +400,13 @@ class Hart85eeris(object):
             # Map to previous
             self.appliances = \
                 appliance.Appliance.match_appliances(appliances,
-                                                     self.appliances)
+                                                     self.appliances,
+                                                     copy_activations=True)
         # Sync live appliances
         self.appliances_live = \
             appliance.Appliance.match_appliances(self.appliances_live,
-                                                 self.appliances)
+                                                 self.appliances,
+                                                 copy_activations=True)
         # Set timestamp
         self._last_clustering_ts = self._buffer.index[-1]
 
@@ -421,7 +427,7 @@ class Hart85eeris(object):
         # Clean edges that are too far back in time
         droplist = []
         for idx, e in self._edges.iterrows():
-            if (self._last_processed_ts - e['end']).days > \
+            if (self.last_processed_ts - e['end']).days > \
                self.EDGES_CLEAN_DAYS:
                 droplist.append(idx)
             else:
@@ -433,7 +439,7 @@ class Hart85eeris(object):
         # Clean steady states that are too far back in time
         droplist = []
         for idx, s in self._steady_states.iterrows():
-            if (self._last_processed_ts - s['end']).days > \
+            if (self.last_processed_ts - s['end']).days > \
                self.STEADY_CLEAN_DAYS:
                 droplist.append(idx)
             else:
@@ -499,7 +505,7 @@ class Hart85eeris(object):
                                        'reactive': edge[1]}, index=[0])
                     self._matches = self._matches.append(df, ignore_index=True,
                                                          sort=True)
-                    # Get the 'mark' column.
+                    # Mark the edge as matched
                     c = e.columns.get_loc('mark')
                     e.iat[i, c] = True
                     e.iat[j, c] = True
@@ -510,7 +516,8 @@ class Hart85eeris(object):
     def _match_edges_hart_live(self):
         """
         Adaptation of Hart's edge matching algorithm to support the "live"
-        display of eeRIS.
+        display of eeRIS. Note that this works only in 'online' mode (small
+        batches of samples at a time).
         """
         if not self.online_edge_detected:
             # No edge was detected
@@ -573,7 +580,7 @@ class Hart85eeris(object):
             # for next edge. Reset everything.
             pass
 
-        # Make sure all previous appliances are finalized
+        # Make sure all previous live appliances are finalized
         for app in self.live:
             app.update_appliance_live()
 
@@ -624,10 +631,10 @@ class Hart85eeris(object):
         Helper function to update the "explained" power consumption _ymatch
         based on a pair of matched edges.
         """
-        end_sec_inv = (self._last_processed_ts - end).seconds
+        end_sec_inv = (self.last_processed_ts - end).seconds
         if end_sec_inv > self.MAX_DISPLAY_SECONDS:
             return
-        start_sec_inv = (self._last_processed_ts - start).seconds
+        start_sec_inv = (self.last_processed_ts - start).seconds
         if start_sec_inv > self.MAX_DISPLAY_SECONDS:
             start_sec_inv = self.MAX_DISPLAY_SECONDS
         self._ymatch[-start_sec_inv:-end_sec_inv] += active
@@ -793,9 +800,9 @@ class Hart85eeris(object):
         # clustering option in the future. This runs as a thread in the
         # background.
         if self._last_clustering_ts is not None:
-            td = self._last_processed_ts - self._last_clustering_ts
+            td = self.last_processed_ts - self._last_clustering_ts
         else:
-            td = self._last_processed_ts - self._start_ts
+            td = self.last_processed_ts - self._start_ts
         self._lock.release()
 
         if td.days >= self.CLUSTER_STEP_DAYS:

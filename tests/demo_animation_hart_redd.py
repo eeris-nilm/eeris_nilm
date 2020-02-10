@@ -34,7 +34,7 @@ class Demo(object):
     def __init__(self, path, date_start, date_end, ax, axt,
                  model_path_r=None, model_path_w=None):
         # Load data
-        self.step = 5
+        self.step = 100
         self.data, self.labels = redd.read_redd(path, date_start, date_end,
                                                 get_channels=False)
         self.power = self.data['mains']
@@ -50,7 +50,7 @@ class Demo(object):
             try:
                 with open(self.model_path_r, "rb") as fp_r:
                     self.model = dill.load(fp_r)
-                self.start_ts = self.model._last_processed_ts + \
+                self.start_ts = self.model.last_processed_ts + \
                     datetime.timedelta(seconds=1)
             except IOError:
                 print("Warning: Cannot read model file." +

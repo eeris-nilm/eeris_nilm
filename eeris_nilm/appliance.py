@@ -20,16 +20,19 @@ import numpy as np
 from numpy import linalg as LA
 import scipy.signal
 import sklearn.cluster
+import logging
 
 
 # TODO: What happens with variable consumption appliances?
 # TODO: Code needs refactoring
+# TODO: Make signature a property and enforce restrictions on shape
 class Appliance(object):
     """
     Unsupervised appliance model. Includes signatures, usage data and statistics
     as well as other data useful for identification through NILM.
     """
     MATCH_THRESHOLD = 35.0
+    MAX_HISTORY_DAYS = 10000
 
     def __init__(self, appliance_id, name, category, signature=None,
                  nominal_voltage=230.0):
@@ -38,35 +41,44 @@ class Appliance(object):
         self.category = category
         self.nominal_voltage = nominal_voltage
         self.num_states = 2  # Default is two-state appliance
-        self.signature = signature
+        self.signature = signature  # Should have num_states-1 rows
         self.final = False  # We are allowed to modify signature
         self.verified = False  # Not sure it is actually a new appliance
         self.inactive = False  # Has it not been used for a long time?
         self.p_signature = signature  # Previous signature (for running average)
         # Should we keep data regarding activation of this applicance?
         self.store_activations = True
-        self.activations = pd.DataFrame([], columns=['start', 'end'])
+        # Time segments of specific appliance states (corresponding to rows of
+        # the signature matrix). The active power at that state is also
+        # recorded.
+        columns = ['start', 'end', 'active']
+        self.activations = pd.DataFrame([], columns=columns)
 
-    def distance(app1, app2):
+    def append_activation(self, start, end, active):
         """
-        Function defining the distance (or dissimilarity) between two appliances
+        Add an entry to the history of activations of this appliance.
 
         Parameters
         ----------
-        app1: First Appliance object
+        start : pandas.Timestamp
+        Start time for the activation
 
-        app2: Second Appliance object
+        end : pandas.Timestamp
+        End time of the activation
 
-        Returns
-        -------
-        out: Distance between the appliances
+        active : float
+        Active power consumption of the state during the activation
 
         """
-        return LA.norm(app1.signature - app2.signature)
+        df = pd.DataFrame(data={'start': start,
+                                'end': end,
+                                'active': active}, index=[0])
+        self.activations = self.activations.append(df, ignore_index=True,
+                                                   sort=True)
 
     def update_appliance_live(self):
         """
-        Update appliance
+        Update live appliance, by updating a running average of its signature.
         """
         if not self.final:
             self.final = True
@@ -138,10 +150,22 @@ class Appliance(object):
         # large?
         u_labels = np.unique(d.labels_[d.labels_ >= 0])
         centers = np.zeros((u_labels.shape[0], seg_values.shape[1]))
+        idx = 0
+        n_skipped = 0
         for l in u_labels:
-            centers[l] = np.mean(seg_values[d.labels_ == l, :], axis=0)
+            c = np.mean(seg_values[d.labels_ == l, :], axis=0)
+            # Low active power is the 'off' state, which is not included.
+            if c[0] < 5.0:
+                centers[idx] = c
+                idx += 1
+            else:
+                n_skipped += 1
+        if n_skipped > 1:
+            logging.debug(('Skipped %d states during appliance'
+                           'signature estimation' % (n_skipped)))
         self.signature = centers
-        self.num_states = centers.shape[0]
+        # Includes implicit 'off' state
+        self.num_states = centers.shape[0] + 1
 
     def compare_power(a1, a2, t):
         """
@@ -234,7 +258,7 @@ class Appliance(object):
                     index = i
         return matched, distance, index
 
-    def match_appliances(a_from, a_to, t=35.0):
+    def match_appliances(a_from, a_to, t=35.0, copy_activations=True):
         """
         Helper function to match between two dictionaries of appliances.
 
@@ -247,6 +271,10 @@ class Appliance(object):
         to map to
 
         t : Beyond this threshold the devices are considered different
+
+        copy_activations : bool
+        Whether to copy the activations of the 'from' appliance to the 'to'
+        appliance.
 
         Returns
         -------
@@ -274,8 +302,8 @@ class Appliance(object):
             candidates = []
             for l in a_to.keys():
                 # Works only for two-state appliances
-                match, d = utils.match_power(a_from[k].signature[0, :],
-                                             a_to[l].signature[0, :],
+                match, d = utils.match_power(a_from[k].signature,
+                                             a_to[l].signature,
                                              active_only=False, t=t)
                 if match:
                     candidates.append((l, d))
@@ -307,3 +335,22 @@ class Appliance(object):
                 # Unmapped new appliances
                 a[k] = a_from[k]
         return a
+
+    def distance(app1, app2):
+        """
+        Function defining the distance (or dissimilarity) between two
+        appliances. For now this is the L2 distance of the first row of their
+        signatures.
+
+        Parameters
+        ----------
+        app1: First Appliance object
+
+        app2: Second Appliance object
+
+        Returns
+        -------
+        out: Distance between the appliances
+
+        """
+        return LA.norm(app1.signature - app2.signature)
