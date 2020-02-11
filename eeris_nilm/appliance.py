@@ -137,10 +137,16 @@ class Appliance(object):
         # Make sure shape is appropriate for dbscan
         if len(seg_values.shape) == 1:
             if seg_values.shape[0] > 1:
+                # Only this should evaluate to true
                 seg_values = seg_values.reshape(-1, 1)
             else:
                 seg_values = seg_values.reshape(1, -1)
-
+        # Subsample large sets, otherwise clustering takes forever. Based on how
+        # seg_values is calculated, we only need to check number of rows.
+        if seg_values.shape[0] > 10000:
+            aidx = np.arange(seg_values.shape[0])
+            np.random.shuffle(aidx)
+            seg_values = seg_values[aidx[:10000]]
         # Cluster the values.
         # TODO: Decide what to do with hardcoded cluster parameters
         d = sklearn.cluster.DBSCAN(eps=30, min_samples=3, metric='euclidean',
@@ -149,23 +155,32 @@ class Appliance(object):
         # TODO: Negative values are outliers. Do we need those? What if they are
         # large?
         u_labels = np.unique(d.labels_[d.labels_ >= 0])
-        centers = np.zeros((u_labels.shape[0], seg_values.shape[1]))
+        # At least have active and reactive power in signature (even if zero).
+        if seg_values.shape[1] == 1:
+            centers = np.zeros((u_labels.shape[0], 2))
+        else:
+            centers = np.zeros((u_labels.shape[0], seg_values.shape[1]))
         idx = 0
         n_skipped = 0
         for l in u_labels:
             c = np.mean(seg_values[d.labels_ == l, :], axis=0)
-            # Low active power is the 'off' state, which is not included.
-            if c[0] < 5.0:
-                centers[idx] = c
+            # Only active power is available
+            if len(c.shape) == 1:
+                c = np.array([c[0], 0.0])
+            # Low active power (at most 10 watts) is the 'off' state, which is
+            # not included.
+            if c[0] > 10.0:
+                centers[idx, :] = c
                 idx += 1
             else:
                 n_skipped += 1
         if n_skipped > 1:
             logging.debug(('Skipped %d states during appliance'
                            'signature estimation' % (n_skipped)))
-        self.signature = centers
-        # Includes implicit 'off' state
-        self.num_states = centers.shape[0] + 1
+        if idx >= 1:
+            self.signature = centers[:idx, :]
+        # No longer includes implicit 'off' state
+        self.num_states = centers.shape[0]
 
     def compare_power(a1, a2, t):
         """
@@ -302,8 +317,8 @@ class Appliance(object):
             candidates = []
             for l in a_to.keys():
                 # Works only for two-state appliances
-                match, d = utils.match_power(a_from[k].signature,
-                                             a_to[l].signature,
+                match, d = utils.match_power(a_from[k].signature[0],
+                                             a_to[l].signature[0],
                                              active_only=False, t=t)
                 if match:
                     candidates.append((l, d))
@@ -338,21 +353,21 @@ class Appliance(object):
                 a[k] = a_from[k]
         return a
 
-    def distance(app1, app2):
-        """
-        Function defining the distance (or dissimilarity) between two
-        appliances. For now this is the L2 distance of the first row of their
-        signatures.
+    # def distance(app1, app2):
+    #     """
+    #     Function defining the distance (or dissimilarity) between two
+    #     appliances. For now this is the L2 distance of the first row of their
+    #     signatures.
 
-        Parameters
-        ----------
-        app1: First Appliance object
+    #     Parameters
+    #     ----------
+    #     app1: First Appliance object
 
-        app2: Second Appliance object
+    #     app2: Second Appliance object
 
-        Returns
-        -------
-        out: Distance between the appliances
+    #     Returns
+    #     -------
+    #     out: Distance between the appliances
 
-        """
-        return LA.norm(app1.signature - app2.signature)
+    #     """
+    #     return LA.norm(app1.signature - app2.signature)

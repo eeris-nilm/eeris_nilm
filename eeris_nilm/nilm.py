@@ -81,8 +81,8 @@ class NILM(object):
                      "name": app.name,
                      "type": app.category,
                      "status": True,
-                     "active": app.signature[0],
-                     "reactive": app.signature[1]}
+                     "active": app.signature[0, 0],
+                     "reactive": app.signature[0, 1]}
             d = {"data": app_d, "timestamp": ts}
             payload.append(d)
         # We ignore residuals under 5 Watts.

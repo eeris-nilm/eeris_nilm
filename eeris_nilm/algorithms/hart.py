@@ -382,10 +382,11 @@ class Hart85eeris(object):
             name = 'Cluster %d' % (l)
             # TODO: Heuristics for determining appliance category
             category = 'unknown'
-            a = appliance.Appliance(l, name, category, signature=centers[l, :])
+            signature = centers[l, :].reshape(-1, 1).T
+            a = appliance.Appliance(l, name, category, signature=signature)
             ml = matches1.iloc[d.labels_ == l, :]
-            a.activations.append(ml[['start', 'end', 'active']],
-                                 ignore_index=True, sort=True)
+            a.activations = a.activations.append(ml[['start', 'end', 'active']],
+                                                 ignore_index=True, sort=True)
             appliances[a.appliance_id] = a
         debug_t_end = datetime.datetime.now()
         debug_t_diff = (debug_t_end - debug_t_start)
@@ -533,7 +534,7 @@ class Hart85eeris(object):
             if not self.live[0].final:
                 p = self.running_avg_power - self._previous_steady_power
                 # Update signature
-                self.live[0].signature = p
+                self.live[0].signature = p.reshape(-1, 1).T
             return
         e = self.online_edge
         if all(np.fabs(e) < self.SIGNIFICANT_EDGE):
@@ -546,7 +547,7 @@ class Hart85eeris(object):
             # TODO: Determine appliance category
             category = 'unknown'
             a = appliance.Appliance(self._appliance_id, name, category,
-                                    signature=e)
+                                    signature=e.reshape(-1, 1).T)
             # Does this look like a known appliance that isn't already matched?
             candidates = self._match_appliances_live(a)
             if not candidates:
@@ -564,7 +565,7 @@ class Hart85eeris(object):
         # Appliance cycle stop. Does it match against previous edges?
         matched = False
         for i in range(len(self.live)):
-            e0 = self.live[i].signature
+            e0 = self.live[i].signature.reshape(-1, 1).T
             match, d = utils.match_power(e0, -e, active_only=True,
                                          t=self.MATCH_THRESHOLD)
             if match:
@@ -613,8 +614,8 @@ class Hart85eeris(object):
                 continue
             # Assumes two-state appliances.
             # TODO: Use Appliance.compare_power() in the future.
-            match, d = utils.match_power(self.appliances_live[k].signature,
-                                         a.signature, active_only=False,
+            match, d = utils.match_power(self.appliances_live[k].signature[0],
+                                         a.signature[0], active_only=False,
                                          t=self.MATCH_THRESHOLD)
             if match:
                 candidates.append((self.appliances_live[k], d))
@@ -699,7 +700,7 @@ class Hart85eeris(object):
         """
         total_estimated = np.array([0.0, 0.0])
         for a in self.live:
-            total_estimated += a.signature
+            total_estimated += a.signature[0]
         total_estimated += self.background_active
         # Allow for 10% error in edge estimation
         if self.running_avg_power[0] < 0.9*total_estimated[0]:
@@ -806,11 +807,13 @@ class Hart85eeris(object):
         self._lock.release()
 
         if td.days >= self.CLUSTER_STEP_DAYS:
-            if (self._clustering_thread is None) or \
-               (not self._clustering_thread.is_alive()):
-                self._clustering_thread = \
-                    threading.Thread(target=self._static_cluster,
-                                     name='clustering_thread')
-                self._clustering_thread.start()
+            # if (self._clustering_thread is None) or \
+            #    (not self._clustering_thread.is_alive()):
+            #     self._clustering_thread = \
+            #         threading.Thread(target=self._static_cluster,
+            #                          name='clustering_thread')
+            #     self._clustering_thread.start()
             # To ensure that the lock can be acquired by the thread
             time.sleep(0.01)
+            # In case we don't want threads (for debugging)
+            self._static_cluster()
