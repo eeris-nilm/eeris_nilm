@@ -331,6 +331,8 @@ class Appliance(object):
             if k in mapping.keys():
                 m = mapping[k]
                 a[m] = a_to[m]
+                if copy_activations:
+                    a[m].activations = a_from[k].activations.copy()
             else:
                 # Unmapped new appliances
                 a[k] = a_from[k]
