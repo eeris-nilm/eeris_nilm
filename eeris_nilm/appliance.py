@@ -17,7 +17,7 @@ limitations under the License.
 from eeris_nilm import utils
 import pandas as pd
 import numpy as np
-from numpy import linalg as LA
+# from numpy import linalg as LA
 import scipy.signal
 import sklearn.cluster
 import logging
@@ -53,6 +53,7 @@ class Appliance(object):
         # recorded.
         columns = ['start', 'end', 'active']
         self.activations = pd.DataFrame([], columns=columns)
+        self._mapped = False  # For debugging purposes (see match_appliances)
 
     def append_activation(self, start, end, active):
         """
@@ -232,7 +233,7 @@ class Appliance(object):
         else:
             return False
 
-    def match_power_state(a1, a2, t):
+    def match_power_state(a1, a2, t=35.0):
         """
         Helper function to see if the 'on' state of a two-state appliance is
         matched with some state of a multi-state appliance
@@ -264,13 +265,15 @@ class Appliance(object):
         matched = False
         distance = 1e10
         index = -1
-        for i in range(len(s2.shape[0])):
+        for i in range(s2.shape[0]):
             match, d = utils.match_power(s1[0, :], s2[i, :], active_only=False)
-            if match:
-                matched = True
-                if d < distance:
-                    distance = d
-                    index = i
+            if d < distance:
+                distance = d
+                index = i
+                # This could be outside the first conditional (should be
+                # equivalent)
+                if match:
+                    matched = True
         return matched, distance, index
 
     def match_appliances(a_from, a_to, t=35.0, copy_activations=True):
@@ -346,6 +349,7 @@ class Appliance(object):
             if k in mapping.keys():
                 m = mapping[k]
                 a[m] = a_to[m]
+                a[m]._mapped = True
                 if copy_activations:
                     a[m].activations = a_from[k].activations.copy()
             else:

@@ -130,7 +130,7 @@ def match_power(p1, p2, active_only=True, t=35.0):
     Parameters
     ----------
 
-    p1, p2 : Numpy arrays with two elements (active and reactive power).
+    p1, p2 : 1x2 Numpy arrays (active and reactive power).
     active_only : Boolean indicating if match should take into account only
     active power or both active and reactive power
     t : Float used to determine whether there is a match or no
@@ -144,10 +144,6 @@ def match_power(p1, p2, active_only=True, t=35.0):
 
     """
     # TODO: Check and enforce signature shapes
-    if len(p1.shape) > 1 and all(p1.shape > 1):
-        p1 = p1[0]
-    if len(p2.shape) > 1 and all(p2.shape > 1):
-        p2 = p2[0]
     if p1[0] < 0.0 or p2[0] < 0.0:
         raise ValueError('Active power must be positive')
     if max((p1[0], p2[0])) >= 1000:

@@ -124,7 +124,7 @@ class Demo(object):
         if not self.model.live:
             cell_text = [['None', '-', '-']]
         else:
-            cell_text = [[m.name, m.signature[0], m.signature[1]]
+            cell_text = [[m.name, m.signature[0, 0], m.signature[0, 1]]
                          for m in self.model.live]
         cell_text.append(['Other', self.model.residual_live[0], '-'])
         cell_text.append(['Background', self.model.background_active, '-'])

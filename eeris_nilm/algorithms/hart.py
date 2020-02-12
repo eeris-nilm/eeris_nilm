@@ -137,7 +137,6 @@ class Hart85eeris(object):
         # Current live appliance id.
         # NOTE: bson object ids are not necessary here. They are used due to
         # integration requirements by other eeRIS modules.
-        self._appliance_id = str(bson.objectid.ObjectId())
         self._appliance_display_id = 0
         # Dictionaries of known appliances
         self.appliances = {}
@@ -383,7 +382,9 @@ class Hart85eeris(object):
             # TODO: Heuristics for determining appliance category
             category = 'unknown'
             signature = centers[l, :].reshape(-1, 1).T
-            a = appliance.Appliance(l, name, category, signature=signature)
+            appliance_id = str(bson.objectid.ObjectId())
+            a = appliance.Appliance(appliance_id, name, category,
+                                    signature=signature)
             ml = matches1.iloc[d.labels_ == l, :]
             a.activations = a.activations.append(ml[['start', 'end', 'active']],
                                                  ignore_index=True, sort=True)
@@ -543,10 +544,11 @@ class Hart85eeris(object):
                 self.live[0].update_appliance_live()
             return
         if e[0] > 0:
+            appliance_id = str(bson.objectid.ObjectId())
             name = 'Live %s' % (str(self._appliance_display_id))
             # TODO: Determine appliance category
             category = 'unknown'
-            a = appliance.Appliance(self._appliance_id, name, category,
+            a = appliance.Appliance(appliance_id, name, category,
                                     signature=e.reshape(-1, 1).T)
             # Does this look like a known appliance that isn't already matched?
             candidates = self._match_appliances_live(a)
@@ -554,7 +556,6 @@ class Hart85eeris(object):
                 # New appliance. Add to live dictionary using id as key.
                 self.appliances_live[a.appliance_id] = a
                 self.live.insert(0, a)
-                self._appliance_id = str(bson.objectid.ObjectId())
                 # Increase display id for next appliance
                 self._appliance_display_id += 1
             else:
@@ -565,7 +566,8 @@ class Hart85eeris(object):
         # Appliance cycle stop. Does it match against previous edges?
         matched = False
         for i in range(len(self.live)):
-            e0 = self.live[i].signature.reshape(-1, 1).T
+            # e0 = self.live[i].signature.reshape(-1, 1).T
+            e0 = self.live[i].signature[0]
             match, d = utils.match_power(e0, -e, active_only=True,
                                          t=self.MATCH_THRESHOLD)
             if match:
@@ -767,6 +769,22 @@ class Hart85eeris(object):
         """
         pass
 
+    def force_clustering(self):
+        """
+        This function forces recomputation of appliance models using the
+        detected and matched edges (after clustering) and returns the activation
+        histories of each appliance. Clustering takes place in a separate
+        thread.
+        """
+        if (self._clustering_thread is None) or \
+           (not self._clustering_thread.is_alive()):
+            self._clustering_thread = \
+                threading.Thread(target=self._static_cluster,
+                                 name='clustering_thread')
+            self._clustering_thread.start()
+            # To ensure that the lock can be acquired by the thread
+            time.sleep(0.01)
+
     def update(self, data=None):
         """
         Wrapper to sequence of operations for model update. Normally, this the
@@ -807,13 +825,6 @@ class Hart85eeris(object):
         self._lock.release()
 
         if td.days >= self.CLUSTER_STEP_DAYS:
-            # if (self._clustering_thread is None) or \
-            #    (not self._clustering_thread.is_alive()):
-            #     self._clustering_thread = \
-            #         threading.Thread(target=self._static_cluster,
-            #                          name='clustering_thread')
-            #     self._clustering_thread.start()
-            # To ensure that the lock can be acquired by the thread
-            time.sleep(0.01)
+            self.force_clustering()
             # In case we don't want threads (for debugging)
-            self._static_cluster()
+            # self._static_cluster()
