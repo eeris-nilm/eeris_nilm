@@ -342,7 +342,12 @@ class Hart85eeris(object):
 
         This function is designed to run as a thread.
         """
-        self._lock.acquire()
+        # Do not wait forever
+        if not self._lock.acquire(timeout=120):
+            logging.debug("Static clustering Lock acquire timeout! - 1")
+            return
+        else:
+            logging.debug("Static clustering lock acquired - 1")
         # Select matched edges to use for clustering
         matches = self._matches.copy()
         matches = matches[['start', 'end', 'active', 'reactive']]
@@ -359,6 +364,7 @@ class Hart85eeris(object):
         # percentage! This will perhaps allow better matches.
         # TODO: Possibly start with high detail and then merge similar clusters?
         self._lock.release()
+        logging.debug("Static clustering lock released - 1")
         debug_t_start = datetime.datetime.now()
         logging.debug('Initiating static clustering at %s' % debug_t_start)
         d = sklearn.cluster.DBSCAN(eps=self.MATCH_THRESHOLD, min_samples=3,
@@ -394,7 +400,11 @@ class Hart85eeris(object):
         logging.debug('Finished static clustering at %s' % (debug_t_end))
         logging.debug('Total clustering time: %s seconds' %
                       (debug_t_diff.seconds))
-        self._lock.acquire()
+        if not self._lock.acquire(timeout=120):
+            logging.debug("Static clustering lock acquire timeout! - 2")
+            return
+        else:
+            logging.debug("Static clustering lock acquired - 2")
         if not self.appliances:
             # First time we detect appliances
             self.appliances = appliances
@@ -415,6 +425,7 @@ class Hart85eeris(object):
         logging.debug('Clustering complete. Current list of appliances:')
         logging.debug(str(self.appliances))
         self._lock.release()
+        logging.debug("Static clustering lock released - 2")
 
     def _clean_buffers(self):
         """
@@ -775,7 +786,16 @@ class Hart85eeris(object):
         detected and matched edges (after clustering) and returns the activation
         histories of each appliance. Clustering takes place in a separate
         thread.
+
+        Returns
+        -------
+
+        out : bool
+        True if the thead was successfully started, False if a clustering thread
+        is already running for the installation
         """
+        # We acquire lock here as well since this function is public and may be
+        # called arbitrarily
         if (self._clustering_thread is None) or \
            (not self._clustering_thread.is_alive()):
             self._clustering_thread = \
@@ -784,6 +804,9 @@ class Hart85eeris(object):
             self._clustering_thread.start()
             # To ensure that the lock can be acquired by the thread
             time.sleep(0.01)
+            return True
+        else:
+            return False
 
     def update(self, data=None):
         """
@@ -791,7 +814,11 @@ class Hart85eeris(object):
         only function anyone will need to call to use the model.
         """
         # For thread safety
-        self._lock.acquire()
+        if not self._lock.acquire(timeout=120):
+            logging.debug("Lock acquire timeout!")
+            return
+        else:
+            logging.debug("Update lock acquired")
         if data is not None:
             self.data = data
         # Preprocessing: Resampling, normalization, missing values, etc.
@@ -823,8 +850,10 @@ class Hart85eeris(object):
         else:
             td = self.last_processed_ts - self._start_ts
         self._lock.release()
+        logging.debug("Update lock released")
 
         if td.days >= self.CLUSTER_STEP_DAYS:
             self.force_clustering()
             # In case we don't want threads (for debugging)
             # self._static_cluster()
+        time.sleep(0.01)

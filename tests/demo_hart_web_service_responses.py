@@ -16,9 +16,13 @@ limitations under the License.
 
 # Demo of edge detection without REST service implementation
 import sys
+import time
 import requests
 import json
+import logging
 from eeris_nilm.datasets import eco
+
+logging.basicConfig(level=logging.DEBUG)
 
 p = 'tests/data/01_sm_csv/01'
 date_start = '2012-06-15T00:00'
@@ -48,3 +52,4 @@ for i in range(0, power.shape[0], step):
         print("Something went wrong, received HTTP %d" % (r.status_code))
     live = r.text
     print("GET response (live): %s" % (live))
+    time.sleep(0.1)

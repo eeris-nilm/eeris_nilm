@@ -1,5 +1,5 @@
 """
-Copyright 2019 Christos Diou
+Copyright 2020 Christos Diou
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -19,8 +19,8 @@ import pandas as pd
 import datetime as dt
 import dill
 import json
+import threading
 import logging
-
 from eeris_nilm.algorithms import hart
 
 
@@ -41,6 +41,7 @@ class NILM(object):
         self._put_count = dict()
         self._prev = 0.0
         self._response = response
+        self._model_lock = dict()
 
     def _prepare_response_body(self, model):
         """ Wrapper function """
@@ -135,11 +136,7 @@ class NILM(object):
                             model._yest[-lret:].tolist())
         return body
 
-    def on_get(self, req, resp, inst_id):
-        """
-        On get, the service returns a document describing the status of a
-        specific installation.
-        """
+    def _load_model(self, inst_id):
         # Load the model, if not loaded already
         if (inst_id not in self._models.keys()):
             inst_doc = self._mdb.models.find_one({"meterId": inst_id})
@@ -150,7 +147,15 @@ class NILM(object):
                                             "exist")
             else:
                 self._models[inst_id] = dill.loads(inst_doc['modelHart'])
-        model = self._models[inst_id]
+                self._model_lock[inst_id] = threading.Lock()
+        return self._models[inst_id]
+
+    def on_get(self, req, resp, inst_id):
+        """
+        On getn, the service returns a document describing the status of a
+        specific installation.
+        """
+        model = self._load_model(inst_id)
         resp.body = self._prepare_response_body(model)
         resp.status = falcon.HTTP_200
 
@@ -167,12 +172,11 @@ class NILM(object):
             data = pd.read_json(req.stream)
         else:
             raise falcon.HTTPBadRequest("No data provided", "No data provided")
-        # Load the model, if not available
+        # Load or create the model, if not available
         if (inst_id not in self._models.keys()):
             inst_doc = self._mdb.models.find_one({"meterId": inst_id})
             if inst_doc is None:
-                modelstr = dill.dumps(
-                    hart.Hart85eeris(installation_id=inst_id))
+                modelstr = dill.dumps(hart.Hart85eeris(installation_id=inst_id))
                 inst_doc = {'meterId': inst_id,
                             'lastUpdate':
                             dt.datetime.now().strftime('%Y-%m-%dT%H:%M:%S%z'),
@@ -180,10 +184,13 @@ class NILM(object):
                             'modelHart': modelstr}
                 self._mdb.models.insert_one(inst_doc)
             self._models[inst_id] = dill.loads(inst_doc['modelHart'])
+            self._model_lock[inst_id] = threading.Lock()
             self._put_count[inst_id] = 0
         model = self._models[inst_id]
         # Process the data
+        self._model_lock[inst_id].acquire()
         model.update(data)
+        self._model_lock[inst_id].release()
         # Store data if needed, and prepare response.
         self._put_count[inst_id] += 1
         if (self._put_count[inst_id] % self.STORE_PERIOD == 0):
@@ -210,4 +217,43 @@ class NILM(object):
         # Remove the model, if it is loaded
         if (inst_id in self._models.keys()):
             del self._models[inst_id]
+            del self._model_lock[inst_id]
+        resp.status = falcon.HTTP_200
+
+    def on_post_clustering(self, req, resp, inst_id):
+        """
+        Starts a clustering thread on the target model
+        """
+        # Load the model, if not loaded already
+        model = self._load_model(inst_id)
+        self._model_lock[inst_id].acquire()
+        if model.force_clustering():
+            resp.status = falcon.HTTP_200
+        else:
+            # Conflict
+            resp.status = falcon.HTTP_409
+        self._model_lock[inst_id].release()
+
+    def on_get_activations(self, req, resp, inst_id):
+        """
+        Requests the list of activations for the appliances of an installation.
+        """
+        # Load the model, if not loaded already
+        model = self._load_model(inst_id)
+        payload = []
+        self._model_lock[inst_id].acquire()
+        for a_k, a in model.appliances:
+            for row in a.activations.itertuples():
+                # Energy consumption in kWh
+                consumption = (row.end - row.start).seconds / 3600.0 * \
+                    row.active / 1000.0
+                b = {"installationid": inst_id,
+                     "deviceid": a.appliance_id,
+                     "start": row.start.timestamp() * 1000,
+                     "end": row.end.timestamp() * 1000,
+                     "consumption": consumption}
+                payload.append(b)
+        self._model_lock[inst_id].release()
+        body = {"payload": payload}
+        resp.body = json.dumps(body)
         resp.status = falcon.HTTP_200

@@ -1,5 +1,5 @@
 """
-Copyright 2019 Christos Diou
+Copyright 2020 Christos Diou
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -19,6 +19,9 @@ import falcon
 import pymongo
 import eeris_nilm.nilm
 import eeris_nilm.installation
+import logging
+
+logging.basicConfig(level=logging.DEBUG)
 
 
 def create_app(dburl, dbname):
@@ -33,7 +36,13 @@ def create_app(dburl, dbname):
 
     # Gunicorn expects the 'application' name
     api = falcon.API()
+    # NILM
     api.add_route('/nilm/{inst_id}', eeris_nilm.nilm.NILM(mdb))
+    api.add_route('/nilm/{inst_id}/clustering', eeris_nilm.nilm.NILM(mdb),
+                  suffix='clustering')
+    api.add_route('/nilm/{inst_id}/activations', eeris_nilm.nilm.NILM(mdb),
+                  suffix='activations')
+    # Installation
     api.add_route('/installation/{inst_id}/model',
                   eeris_nilm.installation.InstallationManager(mdb),
                   suffix='model')

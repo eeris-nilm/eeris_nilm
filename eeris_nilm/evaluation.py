@@ -1,5 +1,5 @@
 """
-Copyright 2019 Christos Diou
+Copyright 2020 Christos Diou
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -15,7 +15,11 @@ limitations under the License.
 """
 
 import numpy as np
-import eeris_nilm.appliance.Appliance
+import os.path
+from sklearn import metrics
+from eeris_nilm import appliance
+from eeris_nilm.datasets import redd
+from eeris_nilm.algorithms import hart
 
 # TODO: Possibly also extract
 # 1. Percentage of energy identified
@@ -27,8 +31,7 @@ import eeris_nilm.appliance.Appliance
 # 2. Wrapper of the above that also performs the mapping of unknown appliances
 # to the known appliances
 
-# TODO: Check documentation format.
-
+# TODO: Replace these metrics with the corresponding metrics of scikit-learn
 
 def rmse(curve1, curve2):
     """
@@ -118,7 +121,6 @@ def jaccard_index(intervals1, intervals2):
     intervals1 : Nx2 numpy.array. First set of start/stop timestamp pairs.
 
     intervals2 : Nx2 numpy.array. Second set of start/stop timestamp pairs.
-
 
     Returns
     -------
@@ -216,3 +218,51 @@ def jaccard_index(intervals1, intervals2):
 #                          'pre-process the samples first.')
 #     curve1 = lcurve_gt['active'].values
 #     curve2 =
+
+
+def hart_redd_evaluation(redd_path, house='house_1',
+                         date_start='2011-04-18T00:00',
+                         date_end='2011-04-25T23:59'):
+
+    p = os.path.join(redd_path, house)
+    data, labels = redd.read_redd(p, date_start='2011-04-18T00:00',
+                                  date_end='2011-04-25T23:59')
+    # Build the model
+    model = hart.Hart85eeris(installation_id=1)
+    step = 6 * 3600
+    for i in range(0, data['mains'].shape[0], step):
+        if i % 3600 == 0:
+            print("Hour count: %d" % (i / 3600))
+        y = data['mains'].iloc[i:min([i+step, data['mains'].shape[0]])]
+        model.update(y)
+    print('Finished')
+
+    # Create ground truth appliances
+    gt_appliances = dict()
+    for i in labels.index:
+        category = labels.loc[i, 'label']
+        if category == 'mains':
+            continue
+        name = category + '_' + str(i)
+        a = appliance.Appliance(i, name, category)
+        a.signature_from_data(data[i])
+        gt_appliances[name] = a
+
+    # Match detected appliances to ground truth
+    mapping = dict()
+    distance = dict()
+    for a_k, a in model.appliances.items():
+        for g_k, g in gt_appliances.items():
+            match, d, index = \
+                appliance.Appliance.match_power_state(a, g, t=35.0)
+            if match and d < distance[a]:
+                mapping[a] = g
+                distance[a] = d
+    # Evaluation section
+    # TODO
+    # jaccard_index
+    # rmse
+    # precision
+    # recall
+    # roc
+
