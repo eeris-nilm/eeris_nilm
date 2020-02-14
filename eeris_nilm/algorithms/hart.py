@@ -345,9 +345,11 @@ class Hart85eeris(object):
         # Do not wait forever
         if not self._lock.acquire(timeout=120):
             logging.debug("Static clustering Lock acquire timeout! - 1")
+            print("DEBUG: Static clustering Lock acquire timeout! - 1")
             return
         else:
             logging.debug("Static clustering lock acquired - 1")
+            print("test - 1", flush=True)
         # Select matched edges to use for clustering
         matches = self._matches.copy()
         matches = matches[['start', 'end', 'active', 'reactive']]
@@ -363,10 +365,13 @@ class Hart85eeris(object):
         # TODO: Normalize matches in the 0-1 range, so that difference is
         # percentage! This will perhaps allow better matches.
         # TODO: Possibly start with high detail and then merge similar clusters?
+        print("DEBUG: Before release", flush=True)
         self._lock.release()
+        print("DEBUG: Static clustering lock released - 1", flush=True)
         logging.debug("Static clustering lock released - 1")
         debug_t_start = datetime.datetime.now()
         logging.debug('Initiating static clustering at %s' % debug_t_start)
+        print("DEBUG: Starting clustering")
         d = sklearn.cluster.DBSCAN(eps=self.MATCH_THRESHOLD, min_samples=3,
                                    metric='euclidean', metric_params=None,
                                    algorithm='auto', leaf_size=30)
@@ -397,6 +402,7 @@ class Hart85eeris(object):
             appliances[a.appliance_id] = a
         debug_t_end = datetime.datetime.now()
         debug_t_diff = (debug_t_end - debug_t_start)
+        print("DEBUG: Finished clustering")
         logging.debug('Finished static clustering at %s' % (debug_t_end))
         logging.debug('Total clustering time: %s seconds' %
                       (debug_t_diff.seconds))
@@ -405,6 +411,7 @@ class Hart85eeris(object):
             return
         else:
             logging.debug("Static clustering lock acquired - 2")
+            print("DEBUG: Static clustering lock acquired - 2")
         if not self.appliances:
             # First time we detect appliances
             self.appliances = appliances
@@ -852,7 +859,8 @@ class Hart85eeris(object):
         self._lock.release()
         logging.debug("Update lock released")
 
-        if td.days >= self.CLUSTER_STEP_DAYS:
+        # if td.days >= self.CLUSTER_STEP_DAYS:
+        if td.seconds >= 5:
             self.force_clustering()
             # In case we don't want threads (for debugging)
             # self._static_cluster()

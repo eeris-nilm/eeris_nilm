@@ -19,9 +19,9 @@ import falcon
 import pymongo
 import eeris_nilm.nilm
 import eeris_nilm.installation
-import logging
+# import logging
 
-logging.basicConfig(level=logging.DEBUG)
+# logging.basicConfig(level=logging.DEBUG)
 
 
 def create_app(dburl, dbname):

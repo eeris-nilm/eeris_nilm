@@ -19,8 +19,9 @@ import pandas as pd
 import datetime as dt
 import dill
 import json
-import threading
 import logging
+import time
+import uwsgi  # Experiment with uwsgi locks. Threading doesn't work
 from eeris_nilm.algorithms import hart
 
 
@@ -41,7 +42,8 @@ class NILM(object):
         self._put_count = dict()
         self._prev = 0.0
         self._response = response
-        self._model_lock = dict()
+        self._model_lock_id = dict()
+        self._model_lock_num = 1
 
     def _prepare_response_body(self, model):
         """ Wrapper function """
@@ -147,7 +149,8 @@ class NILM(object):
                                             "exist")
             else:
                 self._models[inst_id] = dill.loads(inst_doc['modelHart'])
-                self._model_lock[inst_id] = threading.Lock()
+                self._model_lock_id[inst_id] = self._model_lock_num
+                self._model_lock_num += 1
         return self._models[inst_id]
 
     def on_get(self, req, resp, inst_id):
@@ -155,8 +158,13 @@ class NILM(object):
         On getn, the service returns a document describing the status of a
         specific installation.
         """
+        uwsgi.lock(self._model_lock_id[inst_id])
         model = self._load_model(inst_id)
+        logging.debug('WSGI lock (GET)')
         resp.body = self._prepare_response_body(model)
+        uwsgi.unlock(self._model_lock_id[inst_id])
+        logging.debug('WSGI unlock (GET)')
+        time.sleep(0.01)
         resp.status = falcon.HTTP_200
 
     def on_put(self, req, resp, inst_id):
@@ -184,13 +192,17 @@ class NILM(object):
                             'modelHart': modelstr}
                 self._mdb.models.insert_one(inst_doc)
             self._models[inst_id] = dill.loads(inst_doc['modelHart'])
-            self._model_lock[inst_id] = threading.Lock()
+            self._model_lock_id[inst_id] = self._model_lock_num
+            self._model_lock_num += 1
             self._put_count[inst_id] = 0
+        uwsgi.lock(self._model_lock_id[inst_id])
         model = self._models[inst_id]
+        logging.debug('WSGI lock (PUT)')
         # Process the data
-        self._model_lock[inst_id].acquire()
         model.update(data)
-        self._model_lock[inst_id].release()
+        uwsgi.unlock(self._model_lock_id[inst_id])
+        logging.debug('WSGI unlock (PUT)')
+        time.sleep(0.01)
         # Store data if needed, and prepare response.
         self._put_count[inst_id] += 1
         if (self._put_count[inst_id] % self.STORE_PERIOD == 0):
@@ -207,8 +219,7 @@ class NILM(object):
         # resp.body = 'OK'
         # lret = data.shape[0]
         resp.body = self._prepare_response_body(model)
-        # resp.status = falcon.HTTP_200  # Default status
-        resp.status = '200'
+        resp.status = falcon.HTTP_200  # Default status
 
     def on_delete(self, req, resp, inst_id):
         """
@@ -217,7 +228,7 @@ class NILM(object):
         # Remove the model, if it is loaded
         if (inst_id in self._models.keys()):
             del self._models[inst_id]
-            del self._model_lock[inst_id]
+            del self._model_lock_id[inst_id]
         resp.status = falcon.HTTP_200
 
     def on_post_clustering(self, req, resp, inst_id):
@@ -225,23 +236,27 @@ class NILM(object):
         Starts a clustering thread on the target model
         """
         # Load the model, if not loaded already
+        uwsgi.lock(self._model_lock_id[inst_id])
         model = self._load_model(inst_id)
-        self._model_lock[inst_id].acquire()
+        logging.debug('WSGI lock (clustering)')
         if model.force_clustering():
             resp.status = falcon.HTTP_200
         else:
             # Conflict
             resp.status = falcon.HTTP_409
-        self._model_lock[inst_id].release()
+        uwsgi.unlock(self._model_lock_id[inst_id])
+        logging.debug('WSGI unlock (clustering)')
+        time.sleep(0.01)
 
     def on_get_activations(self, req, resp, inst_id):
         """
         Requests the list of activations for the appliances of an installation.
         """
         # Load the model, if not loaded already
+        uwsgi.lock(self._model_lock_id[inst_id])
         model = self._load_model(inst_id)
         payload = []
-        self._model_lock[inst_id].acquire()
+        logging.debug('WSGI lock (activations)')
         for a_k, a in model.appliances:
             for row in a.activations.itertuples():
                 # Energy consumption in kWh
@@ -253,7 +268,9 @@ class NILM(object):
                      "end": row.end.timestamp() * 1000,
                      "consumption": consumption}
                 payload.append(b)
-        self._model_lock[inst_id].release()
+        uwsgi.unlock(self._model_lock_id[inst_id])
+        logging.debug('WSGI unlock (activations)')
+        time.sleep(0.01)
         body = {"payload": payload}
         resp.body = json.dumps(body)
         resp.status = falcon.HTTP_200
