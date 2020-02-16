@@ -15,6 +15,7 @@ limitations under the License.
 """
 
 import numpy as np
+import pandas as pd
 
 
 def get_segments(signal, mask, only_true=True):
@@ -166,3 +167,49 @@ def match_power(p1, p2, active_only=True, t=35.0):
             # Match
             return True, d
     return False, d
+
+
+def power_curve_from_activations(appliances):
+    """
+    Create a power curve corresponding to the joint power consumption of a list
+    of appliances.
+
+    Parameters
+    ----------
+
+    appliances : List
+    List containing eeris_nilm.appliance.Appliance instances. Warning: This
+    function produces power consumption curves with 1 second period for the
+    union of the appliance usage duration without size limitations. It is the
+    caller's responsibility to ensure that no memory issues occur.
+
+    Returns
+    -------
+
+    curve : pandas.DataFrame
+    Dataframe with timestamp index (1 second period) of active and reactive
+    power consumption of the appliance.
+    """
+    # Determine the size of the return dataframe
+    start = None
+    end = None
+    for i in range(len(appliances)):
+        app = appliances[i]
+        app.activations.sort_values('start')
+        ap_start = app.activations.loc[0, 'start']
+        ap_end = app.acivations['start'].iat[-1]
+        if start is None or ap_start < start:
+            start = ap_start
+        if end is None or ap_end > end:
+            end = ap_end
+    idx = pd.date_range(start=ap_start, end=ap_end, freq='S')
+    # ncol = appliances[0].signature.shape[1]
+    ncol = 2  # Fixed number of columns.
+    data = np.zeros(idx.shape[0], ncol)
+    power = pd.DataFrame(index=idx, data=data, columns=['active', 'reactive'])
+    for i in range(len(appliances)):
+        app = appliances[i]
+        s = appliances[i].signature[0]
+        for a in appliances[i].activations.iterrows():
+            power.loc[a['start']:a['end']] += s
+    return power

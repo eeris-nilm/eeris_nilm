@@ -861,7 +861,7 @@ class Hart85eeris(object):
 
         # if td.days >= self.CLUSTER_STEP_DAYS:
         if td.seconds >= 5:
-            self.force_clustering()
+            # self.force_clustering()
             # In case we don't want threads (for debugging)
-            # self._static_cluster()
+            self._static_cluster()
         time.sleep(0.01)

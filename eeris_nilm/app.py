@@ -19,9 +19,9 @@ import falcon
 import pymongo
 import eeris_nilm.nilm
 import eeris_nilm.installation
-# import logging
+import logging
 
-# logging.basicConfig(level=logging.DEBUG)
+logging.basicConfig(level=logging.DEBUG)
 
 
 def create_app(dburl, dbname):
@@ -38,6 +38,7 @@ def create_app(dburl, dbname):
     api = falcon.API()
     # NILM
     api.add_route('/nilm/{inst_id}', eeris_nilm.nilm.NILM(mdb))
+    # TODO: Refactor code. Threads do not work with wsgi.
     api.add_route('/nilm/{inst_id}/clustering', eeris_nilm.nilm.NILM(mdb),
                   suffix='clustering')
     api.add_route('/nilm/{inst_id}/activations', eeris_nilm.nilm.NILM(mdb),

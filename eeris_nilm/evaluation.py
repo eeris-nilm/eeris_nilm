@@ -20,6 +20,7 @@ from sklearn import metrics
 from eeris_nilm import appliance
 from eeris_nilm.datasets import redd
 from eeris_nilm.algorithms import hart
+from eeris_nilm import utils
 
 # TODO: Possibly also extract
 # 1. Percentage of energy identified
@@ -32,6 +33,7 @@ from eeris_nilm.algorithms import hart
 # to the known appliances
 
 # TODO: Replace these metrics with the corresponding metrics of scikit-learn
+
 
 def rmse(curve1, curve2):
     """
@@ -239,30 +241,55 @@ def hart_redd_evaluation(redd_path, house='house_1',
 
     # Create ground truth appliances
     gt_appliances = dict()
+    power = dict()
+    power_binary = dict()
     for i in labels.index:
         category = labels.loc[i, 'label']
         if category == 'mains':
             continue
         name = category + '_' + str(i)
-        a = appliance.Appliance(i, name, category)
-        a.signature_from_data(data[i])
-        gt_appliances[name] = a
+        g = appliance.Appliance(i, name, category)
+        g.signature_from_data(data[i])
+        gt_appliances[name] = g
+        power[g] = data[i]
+        power_binary[g] = power[g] > 15.0
 
     # Match detected appliances to ground truth
     mapping = dict()
+    mapping_g = dict()
     distance = dict()
-    for a_k, a in model.appliances.items():
-        for g_k, g in gt_appliances.items():
+    est_power = dict()
+    for g_k, g in gt_appliances.items():
+        mapping_g[g] = []
+        matched = False
+        for a_k, a in model.appliances.items():
             match, d, index = \
                 appliance.Appliance.match_power_state(a, g, t=35.0)
             if match and d < distance[a]:
                 mapping[a] = g
                 distance[a] = d
+                mapping_g[g].append(a)
+                matched = True
+        if matched:
+            # Create one power consumption curve per ground-truth appliance
+            est_power[g] = utils.power_curve_from_activations(mapping_g[g])
+            est_power_binary[g] = est_power[g] > 0.0
+    # TODO: matched variable in following
     # Evaluation section
-    # TODO
+    jaccard = dict()
+    for g_k, g in gt_appliances.items():
+        pg = power[g].values
+        pa = est_power[g].values
+        pg_b = power_binary[g].values
+        pa_b = est_power_binary[g].values
+        jaccard[g] = metrics.jaccard_score(pg_b, pa_b)
+        print('Jaccard %s: %f' % (g.name, jaccard[g]))
+        rmse[g] = np.sqrt(metrics.mean_squared_error(pg, pa))
+        print('RMSE %s: %f' % (g.name, rmse[g]))
+    return jaccard, rmse
+    # TODO: Evaluation at segment level
     # jaccard_index
     # rmse
     # precision
     # recall
     # roc
-
