@@ -15,6 +15,7 @@ limitations under the License.
 """
 
 import numpy as np
+import pandas as pd
 import os.path
 from sklearn import metrics
 from eeris_nilm import appliance
@@ -33,50 +34,6 @@ from eeris_nilm import utils
 # to the known appliances
 
 # TODO: Replace these metrics with the corresponding metrics of scikit-learn
-
-
-def rmse(curve1, curve2):
-    """
-    This function computes the root mean squared error (RMSE) between two load
-    curves. The curves are numpy arrays, so it is required that they have the
-    same length and that they correspond to the same time samples.
-
-    Parameters
-    ----------
-    curve1 : numpy.array. Nx1 numpy array corresponding to the first load curve
-
-    curve2 : numpy.array. Nx1 numpy array corresponding to the second load curve
-
-    Returns
-    -------
-    out : The computed RMSE value
-
-    """
-    assert all(curve1.shape == curve2.shape)
-    e = np.sqrt(np.mean((curve1 - curve2) ** 2))
-    return e
-
-
-def mae(curve1, curve2):
-    """
-    This function computes the mean absolute error (MAE) between two load
-    curves. The curves are numpy arrays, so it is required that they have the
-    same length and that they correspond to the same time samples.
-
-    Parameters
-    ----------
-    curve1 : Nx1 numpy array corresponding to the first load curve
-
-    curve2 : Nx1 numpy array corresponding to the second load curve
-
-    Returns
-    -------
-    out : The computed MAE value
-
-    """
-    assert all(curve1.shape == curve2.shape)
-    e = np.mean(np.fabs(curve1 - curve2))
-    return e
 
 
 def mape(curve1, curve2):
@@ -192,43 +149,15 @@ def jaccard_index(intervals1, intervals2):
     return j_index
 
 
-# def rmse_twostate(matches_d, lcurve_gt):
-#     """
-#     This function computes the root mean squared error (RMSE) of a set of
-#     matching pairs (on and off cycles) of a two-state appliance compared to a
-#     ground truth load curve (presumably for the same appliance). The function
-#     first reconstructs the estimated load curve of the two-state appliance and
-#     then performs the comparison.
-
-#     Parameters
-#     ----------
-#     matches_d : Nx2 numpy array corresponding to detected matches of appliance
-#     switch on/off events.
-
-#     lcurve_gt : A pandas dataframe with measurements. Comparison is made in
-#     terms of the active power (column 'active' in the dataframe). It is
-#     assumed that the measurements are taken with constant sampling rate.
-
-#     Returns
-#     -------
-#     out : The computed RMSE value
-
-#     """
-#     fs = lcurve_gt.freq
-#     if fs is None:
-#         raise ValueError('lcurve_gt does not have constant sampling rate. ' +
-#                          'pre-process the samples first.')
-#     curve1 = lcurve_gt['active'].values
-#     curve2 =
-
-
+# TODO: Documentation, break this function into a dataset-specific component and
+# a general-purpose component
 def hart_redd_evaluation(redd_path, house='house_1',
                          date_start='2011-04-18T00:00',
                          date_end='2011-04-25T23:59'):
-
+    # TODO: Pydoc string
     p = os.path.join(redd_path, house)
-    data, labels = redd.read_redd(p, date_start='2011-04-18T00:00',
-                                  date_end='2011-04-25T23:59')
+    data, labels = redd.read_redd(p, date_start=date_start,
+                                  date_end=date_end)
     # Build the model
     model = hart.Hart85eeris(installation_id=1)
     step = 6 * 3600
@@ -242,7 +171,6 @@ def hart_redd_evaluation(redd_path, house='house_1',
     # Create ground truth appliances
     gt_appliances = dict()
     power = dict()
-    power_binary = dict()
     for i in labels.index:
         category = labels.loc[i, 'label']
         if category == 'mains':
@@ -250,9 +178,16 @@ def hart_redd_evaluation(redd_path, house='house_1',
         name = category + '_' + str(i)
         g = appliance.Appliance(i, name, category)
         g.signature_from_data(data[i])
+        # Failed to create signature
+        if g.signature is None:
+            continue
         gt_appliances[name] = g
-        power[g] = data[i]
-        power_binary[g] = power[g] > 15.0
+        # Perform all evaluations using normalized and resampled data
+        p = utils.get_normalized_data(data[i],
+                                      nominal_voltage=g.nominal_voltage)
+        p = p[['active']]
+        p = utils.preprocess_data(p)
+        power[g] = p
 
     # Match detected appliances to ground truth
     mapping = dict()
@@ -263,6 +198,8 @@ def hart_redd_evaluation(redd_path, house='house_1',
         mapping_g[g] = []
         matched = False
         for a_k, a in model.appliances.items():
+            distance[a] = 1e10
+            mapping[a] = None
             match, d, index = \
                 appliance.Appliance.match_power_state(a, g, t=35.0)
             if match and d < distance[a]:
@@ -272,21 +209,50 @@ def hart_redd_evaluation(redd_path, house='house_1',
                 matched = True
         if matched:
             # Create one power consumption curve per ground-truth appliance
-            est_power[g] = utils.power_curve_from_activations(mapping_g[g])
-            est_power_binary[g] = est_power[g] > 0.0
+            est_power[g] = utils.power_curve_from_activations(mapping_g[g],
+                                                              start=date_start,
+                                                              end=date_end)
+        else:
+            est_power[g] = None
     # TODO: matched variable in following
     # Evaluation section
+    eval_g = dict()
+    eval_est = dict()
     jaccard = dict()
+    rmse = dict()
     for g_k, g in gt_appliances.items():
-        pg = power[g].values
-        pa = est_power[g].values
-        pg_b = power_binary[g].values
-        pa_b = est_power_binary[g].values
+        # Make sure date range is correct
+        p = power[g]['active'].copy()
+        start_g = p.index[0]
+        end_g = p.index[-1]
+        # Take only the interval where ground truth and estimate overlap.
+        if est_power[g] is not None:
+            start_est = est_power[g].index[0]
+            end_est = est_power[g].index[-1]
+            if start_est > start_g:
+                start = start_est
+            else:
+                start = start_g
+            if end_est > end_g:
+                end = end_g
+            else:
+                end = end_est
+            pg = p[start:end].values
+            pg_b = pg > 15.0
+            pa = est_power[g][start:end]['active'].values
+            pa_b = pa > 0.0
+        else:
+            pg = p.values
+            pg_b = pg > 15.0  # TODO: Arbitrary threshold
+            pa = np.zeros(pg.shape)
+            pa_b = np.zeros(pg_b.shape)
+        eval_g[g] = pg
+        eval_est[g] = pa
         jaccard[g] = metrics.jaccard_score(pg_b, pa_b)
         print('Jaccard %s: %f' % (g.name, jaccard[g]))
         rmse[g] = np.sqrt(metrics.mean_squared_error(pg, pa))
         print('RMSE %s: %f' % (g.name, rmse[g]))
-    return jaccard, rmse
+    return gt_appliances, eval_g, eval_est, jaccard, rmse
     # TODO: Evaluation at segment level
     # jaccard_index
     # rmse

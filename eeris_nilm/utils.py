@@ -169,7 +169,7 @@ def match_power(p1, p2, active_only=True, t=35.0):
     return False, d
 
 
-def power_curve_from_activations(appliances):
+def power_curve_from_activations(appliances, start=None, end=None):
     """
     Create a power curve corresponding to the joint power consumption of a list
     of appliances.
@@ -183,33 +183,59 @@ def power_curve_from_activations(appliances):
     union of the appliance usage duration without size limitations. It is the
     caller's responsibility to ensure that no memory issues occur.
 
+    start : String or None
+    Start time for the power curve. The string must be in
+    a format understood by pandas.Timestamp(). Only activations taking place
+    after this time are considered. If None, the earliest start time of the data
+    is used.
+
+    end : String or None
+    End time for the power curve. The string must be in
+    a format understood by pandas.Timestamp(). Only activations taking place
+    before this time are considered. If None, the earliest start time of the
+    data is used.
+
     Returns
     -------
 
     curve : pandas.DataFrame
     Dataframe with timestamp index (1 second period) of active and reactive
     power consumption of the appliance.
+
     """
     # Determine the size of the return dataframe
-    start = None
-    end = None
-    for i in range(len(appliances)):
-        app = appliances[i]
-        app.activations.sort_values('start')
-        ap_start = app.activations.loc[0, 'start']
-        ap_end = app.acivations['start'].iat[-1]
-        if start is None or ap_start < start:
-            start = ap_start
-        if end is None or ap_end > end:
-            end = ap_end
-    idx = pd.date_range(start=ap_start, end=ap_end, freq='S')
+    if start is None or end is None:
+        est_start = None
+        est_end = None
+        for i in range(len(appliances)):
+            app = appliances[i]
+            app.activations.sort_values('start')
+            ap_start = app.activations.loc[0, 'start']
+            ap_end = app.activations['start'].iat[-1]
+            if est_start is None or ap_start < est_start:
+                est_start = ap_start
+            if est_end is None or ap_end > est_end:
+                est_end = ap_end
+        if start is None and end is not None:
+            start = est_start
+            end = pd.Timestamp(end)
+        elif start is not None and end is None:
+            start = pd.Timestamp(start)
+            end = est_end
+        else:
+            start = est_start
+            end = est_end
+    else:
+        start = pd.Timestamp(start)
+        end = pd.Timestamp(end)
+    idx = pd.date_range(start=start, end=end, freq='S')
     # ncol = appliances[0].signature.shape[1]
     ncol = 2  # Fixed number of columns.
-    data = np.zeros(idx.shape[0], ncol)
+    data = np.zeros(np.array([idx.shape[0], ncol]))
     power = pd.DataFrame(index=idx, data=data, columns=['active', 'reactive'])
     for i in range(len(appliances)):
         app = appliances[i]
         s = appliances[i].signature[0]
-        for a in appliances[i].activations.iterrows():
-            power.loc[a['start']:a['end']] += s
+        for _, act in appliances[i].activations.iterrows():
+            power.loc[act['start']:act['end']] += s
     return power

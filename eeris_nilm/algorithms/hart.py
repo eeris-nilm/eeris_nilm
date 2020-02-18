@@ -50,7 +50,7 @@ class Hart85eeris(object):
     STEADY_SAMPLES_NUM = 7
     MATCH_THRESHOLD = 35
     MAX_MATCH_THRESHOLD_DAYS = 1
-    EDGES_CLEAN_DAYS = 15
+    EDGES_CLEAN_HOURS = 12
     STEADY_CLEAN_DAYS = 15
     MATCHES_CLEAN_DAYS = 3 * 365   # Unused for now
     OVERESTIMATION_SECONDS = 10
@@ -62,7 +62,8 @@ class Hart85eeris(object):
     CLUSTER_DATA_DAYS = 30 * 3  # Use last 3 months for clustering
     MIN_EDGES_STATIC_CLUSTERING = 5  # DBSCAN parameter
     LARGE_POWER = 1e6  # Large power consumption
-    BACKGROUND_UPDATE_DAYS = 10  # How many days since background was updated
+    BACKGROUND_UPDATE_DAYS = 15  # Use past days for background estimation
+    BACKGROUND_UPDATE_PERIOD_HOURS = 1
 
     def __init__(self, installation_id, nominal_voltage=230.0):
         # Almost all variables are needed as class members, to support streaming
@@ -345,11 +346,7 @@ class Hart85eeris(object):
         # Do not wait forever
         if not self._lock.acquire(timeout=120):
             logging.debug("Static clustering Lock acquire timeout! - 1")
-            print("DEBUG: Static clustering Lock acquire timeout! - 1")
             return
-        else:
-            logging.debug("Static clustering lock acquired - 1")
-            print("test - 1", flush=True)
         # Select matched edges to use for clustering
         matches = self._matches.copy()
         matches = matches[['start', 'end', 'active', 'reactive']]
@@ -365,13 +362,9 @@ class Hart85eeris(object):
         # TODO: Normalize matches in the 0-1 range, so that difference is
         # percentage! This will perhaps allow better matches.
         # TODO: Possibly start with high detail and then merge similar clusters?
-        print("DEBUG: Before release", flush=True)
         self._lock.release()
-        print("DEBUG: Static clustering lock released - 1", flush=True)
-        logging.debug("Static clustering lock released - 1")
         debug_t_start = datetime.datetime.now()
         logging.debug('Initiating static clustering at %s' % debug_t_start)
-        print("DEBUG: Starting clustering")
         d = sklearn.cluster.DBSCAN(eps=self.MATCH_THRESHOLD, min_samples=3,
                                    metric='euclidean', metric_params=None,
                                    algorithm='auto', leaf_size=30)
@@ -402,16 +395,12 @@ class Hart85eeris(object):
             appliances[a.appliance_id] = a
         debug_t_end = datetime.datetime.now()
         debug_t_diff = (debug_t_end - debug_t_start)
-        print("DEBUG: Finished clustering")
         logging.debug('Finished static clustering at %s' % (debug_t_end))
         logging.debug('Total clustering time: %s seconds' %
                       (debug_t_diff.seconds))
         if not self._lock.acquire(timeout=120):
             logging.debug("Static clustering lock acquire timeout! - 2")
             return
-        else:
-            logging.debug("Static clustering lock acquired - 2")
-            print("DEBUG: Static clustering lock acquired - 2")
         if not self.appliances:
             # First time we detect appliances
             self.appliances = appliances
@@ -432,7 +421,6 @@ class Hart85eeris(object):
         logging.debug('Clustering complete. Current list of appliances:')
         logging.debug(str(self.appliances))
         self._lock.release()
-        logging.debug("Static clustering lock released - 2")
 
     def _clean_buffers(self):
         """
@@ -447,8 +435,9 @@ class Hart85eeris(object):
         # Clean edges that are too far back in time
         droplist = []
         for idx, e in self._edges.iterrows():
-            if (self.last_processed_ts - e['end']).days > \
-               self.EDGES_CLEAN_DAYS:
+            td = (self.last_processed_ts - e['end']).total_seconds() / 3600.0
+
+            if td > self.EDGES_CLEAN_HOURS:
                 droplist.append(idx)
             else:
                 # Edge times are sorted
@@ -485,8 +474,9 @@ class Hart85eeris(object):
         On/Off matching using edges (as opposed to clusters). This is the method
         implemented by Hart for the two-state load monitor (it won't work
         directly for multi-state appliances). It is implemented as close as
-        possible to Hart's original paper (1985). The approach is rather
-        simplistic and can lead to serious detection errors.
+        possible to Hart's original paper (1985). We search for matches at
+        neighboring edges first, increasing the distance if we fail to find
+        matches.
         """
         if self._edges.empty:
             return
@@ -494,13 +484,19 @@ class Hart85eeris(object):
         # pbuffer = self._edges.loc[~(self._edges['mark']).astype(bool)]
         # Helper, to keep code tidy
         e = self._edges
-        # Double for loop, what are the alternatives?
-        for i in range(len(e)):
-            # Only check positive and unmarked
-            if e.iloc[i]['active'] < 0 or e.iloc[i]['mark']:
-                continue
-            e1 = e.iloc[i][['active', 'reactive']].values.astype(np.float64)
-            for j in range(i + 1, len(e)):
+        len_e = len(self._edges)
+        # Multiple loops, what are the alternatives?
+        # Distance of edges
+        for dst in range(1, len_e):
+            # Check each edge
+            for i in range(len_e-1):
+                # Only check positive and unmarked
+                if e.iloc[i]['active'] < 0 or e.iloc[i]['mark']:
+                    continue
+                j = i + dst
+                # No more edges to check
+                if j >= len_e:
+                    break
                 # Edge has been marked before or is positive
                 if e.iloc[j]['active'] >= 0 or e.iloc[j]['mark']:
                     continue
@@ -510,15 +506,16 @@ class Hart85eeris(object):
                     continue
                 # Do they match? (use negative of edge, since it is the negative
                 # part)
-                e2 = -e.iloc[j][['active', 'reactive']].\
-                    values.astype(np.float64)
+                e1 = e.iloc[i][['active', 'reactive']].values.astype(np.float64)
+                e2 = \
+                    -e.iloc[j][['active', 'reactive']].values.astype(np.float64)
                 match, d = utils.match_power(e1, e2, active_only=True,
                                              t=self.MATCH_THRESHOLD)
                 if match:
                     # Match
                     edge = (np.fabs(e1) + np.fabs(e2)) / 2.0
-                    # Ideally we should keep both start and end times for each
-                    # edge
+                    # TODO: We keep only 'start' time for each edge. Is this OK?
+                    # Should we use 'end' time of e.iloc[j]?
                     df = pd.DataFrame({'start': e.iloc[i]['start'],
                                        'end': e.iloc[j]['start'],
                                        'active': edge[0],
@@ -526,10 +523,10 @@ class Hart85eeris(object):
                     self._matches = self._matches.append(df, ignore_index=True,
                                                          sort=True)
                     # Mark the edge as matched
-                    c = e.columns.get_loc('mark')
+                    c = e.columns.get_loc('mark')  # Crazy pandas indexing...
                     e.iat[i, c] = True
                     e.iat[j, c] = True
-                    break
+                    continue
         # Perform sanity checks and clean buffers.
         self._clean_buffers()
 
@@ -745,34 +742,26 @@ class Hart85eeris(object):
         """
         Maintain an estimate of the background power consumption
         """
-        steady_states = self._steady_states['active'].values
-        # We assume that background consumption is more than 1 Watt. This
-        # ignores missing values or errors in measurements that result in
-        # zeros.
-        v = steady_states[steady_states > 1.0]
-        if v.shape[0] > 0:
-            background = np.min(v)
-        else:
-            # Return if no new values have been added.
-            return
-
-        # Days since update of background
-        # TODO Debug/check
-        days_since_update = 0
         if self._background_last_update is not None:
-            if self.data.shape[0] > 0:
-                days_since_update = (self.data.index[-1] -
-                                     self._background_last_update).days
+            td = (self.data.index[-1] - self._background_last_update)
+            hours_since_update = td.total_seconds() / 3600.0
         else:
-            days_since_update = self.BACKGROUND_UPDATE_DAYS + 1
-
-        # Update background estimate
-        if self.background_active > background or \
-           days_since_update >= self.BACKGROUND_UPDATE_DAYS:
-            self.background_active = background
-            if self.data.shape[0] > 0:
+            hours_since_update = self.BACKGROUND_UPDATE_PERIOD_HOURS + 1.0
+        if hours_since_update > self.BACKGROUND_UPDATE_PERIOD_HOURS:
+            last_ts = self._steady_states.iloc[-1]['start']
+            idx = self._steady_states['start'] > \
+                (last_ts - pd.Timedelta(days=self.BACKGROUND_UPDATE_DAYS))
+            steady_states = self._steady_states[idx]['active'].values
+            # We assume that background consumption is more than 1 Watt. This
+            # ignores missing values or errors in measurements that result in
+            # zeros.
+            v = steady_states[steady_states > 1.0]
+            if v.shape[0] > 0:
+                self.background_active = np.min(v)
                 self._background_last_update = self.data.index[-1]
-
+            else:
+                # Return if no new steady states exist (how?)
+                return
         # Hard way of dealing with discrepancies: Reset background
         if self.background_active > self.running_avg_power[0]:
             logging.debug(("Something's wrong with the background estimation:"
@@ -824,8 +813,6 @@ class Hart85eeris(object):
         if not self._lock.acquire(timeout=120):
             logging.debug("Lock acquire timeout!")
             return
-        else:
-            logging.debug("Update lock acquired")
         if data is not None:
             self.data = data
         # Preprocessing: Resampling, normalization, missing values, etc.
@@ -857,7 +844,6 @@ class Hart85eeris(object):
         else:
             td = self.last_processed_ts - self._start_ts
         self._lock.release()
-        logging.debug("Update lock released")
 
         # if td.days >= self.CLUSTER_STEP_DAYS:
         if td.seconds >= 5:
