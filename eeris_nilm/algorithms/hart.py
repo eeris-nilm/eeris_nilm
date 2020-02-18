@@ -50,7 +50,7 @@ class Hart85eeris(object):
     STEADY_SAMPLES_NUM = 7
     MATCH_THRESHOLD = 35
     MAX_MATCH_THRESHOLD_DAYS = 1
-    EDGES_CLEAN_HOURS = 12
+    EDGES_CLEAN_HOURS = 6
     STEADY_CLEAN_DAYS = 15
     MATCHES_CLEAN_DAYS = 3 * 365   # Unused for now
     OVERESTIMATION_SECONDS = 10
@@ -390,6 +390,8 @@ class Hart85eeris(object):
             a = appliance.Appliance(appliance_id, name, category,
                                     signature=signature)
             ml = matches1.iloc[d.labels_ == l, :]
+            # Remove overlapping matches
+            ml = utils.remove_overlapping_matches(ml)
             a.activations = a.activations.append(ml[['start', 'end', 'active']],
                                                  ignore_index=True, sort=True)
             appliances[a.appliance_id] = a

@@ -239,3 +239,32 @@ def power_curve_from_activations(appliances, start=None, end=None):
         for _, act in appliances[i].activations.iterrows():
             power.loc[act['start']:act['end']] += s
     return power
+
+
+def remove_overlapping_matches(matches):
+    """
+    Remove overlapping matches. First, the function removes matches that
+    include other matches of the same appliance (start1 < start2 and end1 >
+    end2).
+
+    Parameters
+    ----------
+
+    matches : pandas.DataFrame with columns 'start', 'end', as well as other
+    columns with match signature.
+
+    Returns
+    -------
+
+    out : pandas.DataFrame without matches that are supersets of other
+    matches
+    """
+    out = matches.copy()
+    # Find all segments that enclose this one
+    for _, row in matches.iterrows():
+        start = row['start']
+        end = row['end']
+        idx = out.index[(out['start'] < start) & (out['end'] > end)]
+        out.drop(index=idx, inplace=True)
+    return out
+    # TODO: Merge partially overlapping segments?
