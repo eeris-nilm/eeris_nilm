@@ -351,6 +351,7 @@ class Hart85eeris(object):
         matches = self._matches.copy()
         matches = matches[['start', 'end', 'active', 'reactive']]
         if len(matches) < self.MIN_EDGES_STATIC_CLUSTERING:
+            self._lock.release()
             return
         start_ts = matches['start'].iloc[-1] - \
             pd.offsets.Day(self.CLUSTER_DATA_DAYS)
@@ -749,7 +750,8 @@ class Hart85eeris(object):
             hours_since_update = td.total_seconds() / 3600.0
         else:
             hours_since_update = self.BACKGROUND_UPDATE_PERIOD_HOURS + 1.0
-        if hours_since_update > self.BACKGROUND_UPDATE_PERIOD_HOURS:
+        if hours_since_update > self.BACKGROUND_UPDATE_PERIOD_HOURS and \
+           not self._steady_states.empty:
             last_ts = self._steady_states.iloc[-1]['start']
             idx = self._steady_states['start'] > \
                 (last_ts - pd.Timedelta(days=self.BACKGROUND_UPDATE_DAYS))

@@ -77,6 +77,21 @@ class Appliance(object):
         self.activations = self.activations.append(df, ignore_index=True,
                                                    sort=True)
 
+    def append_signature(self, signature):
+        """
+        Add one or more [active, reactive] rows to appliance signature
+        """
+        if signature.shape[1] < 2:
+            raise ValueError(("Signature must have at least active and"
+                              "reactive power columns"))
+        if self.signature is None:
+            self.signature = signature
+            return
+        if self.signature.shape[1] != signature.shape[1]:
+            raise ValueError(("Signature shape incompatible"
+                              "with appliance signature"))
+        self.signature = np.append(self.signature, signature, axis=0)
+
     def update_appliance_live(self):
         """
         Update live appliance, by updating a running average of its signature.

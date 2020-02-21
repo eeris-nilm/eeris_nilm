@@ -15,7 +15,6 @@ limitations under the License.
 """
 
 import numpy as np
-import pandas as pd
 import os.path
 from sklearn import metrics
 from eeris_nilm import appliance
@@ -150,6 +149,7 @@ def jaccard_index(intervals1, intervals2):
 
 
 # TODO: Documentation, break this function into a dataset-specific component and
+# TODO: Examine the steady-state alternative as well
 # a general-purpose component
 def hart_redd_evaluation(redd_path, house='house_1',
                          date_start='2011-04-17T00:00',
@@ -168,16 +168,29 @@ def hart_redd_evaluation(redd_path, house='house_1',
         model.update(y)
     print('Finished')
 
-    # Create ground truth appliances
+    # Create ground truth appliances (based on edges)
     gt_appliances = dict()
     power = dict()
     for i in labels.index:
+        # For each appliance
         category = labels.loc[i, 'label']
         if category == 'mains':
             continue
         name = category + '_' + str(i)
+        model_g = hart.Hart85eeris(installation_id=1)
         g = appliance.Appliance(i, name, category)
-        g.signature_from_data_steady_states(data[i])
+        # Train a Hart model
+        for j in range(0, data[i].shape[0], step):
+            if j % 3600 == 0:
+                print('Appliance %s, hour count %d' % (name, j/3600))
+            y = data[i].iloc[j:min([j+step, data[i].shape[0]])]
+            # Insert face reactive and voltage columns.
+            y.insert(1, 'reactive', 0.0)
+            y.insert(1, 'voltage', g.nominal_voltage)
+            model_g.update(y)
+        # Signatures of detected appliances
+        for a in model_g.appliances.values():
+            g.append_signature(a.signature)
         # Failed to create signature
         if g.signature is None:
             continue
