@@ -152,11 +152,11 @@ def jaccard_index(intervals1, intervals2):
 # TODO: Documentation, break this function into a dataset-specific component and
 # a general-purpose component
 def hart_redd_evaluation(redd_path, house='house_1',
-                         date_start='2011-04-18T00:00',
-                         date_end='2011-04-25T23:59'):
+                         date_start='2011-04-17T00:00',
+                         date_end='2011-05-30T23:59'):
     # TODO: Pydoc string
-    p = os.path.join(redd_path, house)
-    data, labels = redd.read_redd(p, date_start=date_start,
+    path = os.path.join(redd_path, house)
+    data, labels = redd.read_redd(path, date_start=date_start,
                                   date_end=date_end)
     # Build the model
     model = hart.Hart85eeris(installation_id=1)
@@ -177,7 +177,7 @@ def hart_redd_evaluation(redd_path, house='house_1',
             continue
         name = category + '_' + str(i)
         g = appliance.Appliance(i, name, category)
-        g.signature_from_data(data[i])
+        g.signature_from_data_steady_states(data[i])
         # Failed to create signature
         if g.signature is None:
             continue
@@ -189,26 +189,29 @@ def hart_redd_evaluation(redd_path, house='house_1',
         p = utils.preprocess_data(p)
         power[g] = p
 
-    # Match detected appliances to ground truth
-    mapping = dict()
+    # Match detected appliances to ground truth.
     mapping_g = dict()
-    distance = dict()
+    mapping = dict()  # Needed for debugging/experiments
+    distance = {a: 1e6 for a in model.appliances.values()}
     est_power = dict()
     for g_k, g in gt_appliances.items():
         mapping_g[g] = []
-        matched = False
         for a_k, a in model.appliances.items():
-            distance[a] = 1e10
-            mapping[a] = None
             match, d, index = \
-                appliance.Appliance.match_power_state(a, g, t=35.0)
+                appliance.Appliance.match_power_state(a, g, t=35.0,
+                                                      lp=350,
+                                                      m=0.1)
             if match and d < distance[a]:
+                # Strict evaluation: Each detected appliance matches exactly one
+                # ground truth appliance
+                if a in mapping.keys():
+                    g_old = mapping[a]
+                    mapping_g[g_old].remove(a)
                 mapping[a] = g
-                distance[a] = d
                 mapping_g[g].append(a)
-                matched = True
-        if matched:
-            # Create one power consumption curve per ground-truth appliance
+        if mapping_g[g]:
+            # Create one estimated power consumption curve per ground-truth
+            # appliance
             est_power[g] = utils.power_curve_from_activations(mapping_g[g],
                                                               start=date_start,
                                                               end=date_end)

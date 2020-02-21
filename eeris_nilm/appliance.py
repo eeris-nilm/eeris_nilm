@@ -88,13 +88,13 @@ class Appliance(object):
             self.signature = 0.9 * self.p_signature + 0.1 * self.signature
         self.p_signature = self.signature
 
-    def signature_from_data(self, data):
+    def signature_from_data_steady_states(self, data):
         """
         Given active (and, possibly, reactive) recorded data from an appliance
         (e.g., data from a smart plug), this function computes the appliance
-        signature. If a 'voltage' column is available, it is used for data
-        normalization purposes. Segmentation to determine consumption levels is
-        only done on active power data.
+        signature based on the measured consumption steady states. If a
+        'voltage' column is available, it is used for data normalization
+        purposes.
 
         Parameters
         ----------
@@ -144,10 +144,10 @@ class Appliance(object):
                 seg_values = seg_values.reshape(1, -1)
         # Subsample large sets, otherwise clustering takes forever. Based on how
         # seg_values is calculated, we only need to check number of rows.
-        if seg_values.shape[0] > 10000:
+        if seg_values.shape[0] > 20000:
             aidx = np.arange(seg_values.shape[0])
             np.random.shuffle(aidx)
-            seg_values = seg_values[aidx[:10000]]
+            seg_values = seg_values[aidx[:20000]]
         # Cluster the values.
         # TODO: Decide what to do with hardcoded cluster parameters
         d = sklearn.cluster.DBSCAN(eps=30, min_samples=3, metric='euclidean',
@@ -233,7 +233,7 @@ class Appliance(object):
         else:
             return False
 
-    def match_power_state(a1, a2, t=35.0):
+    def match_power_state(a1, a2, t=None, lp=None, m=None):
         """
         Helper function to see if the 'on' state of a two-state appliance is
         matched with some state of a multi-state appliance
@@ -241,13 +241,11 @@ class Appliance(object):
         Parameters
         ----------
         a1 : eeris_nilm.appliance.Appliance object. Only the first state is
-        considered (even if it has more than one).
+        considered (even if it has more than one)
 
         a2 : eeris_nilm.appliance.Appliance object
 
-        t : Float
-        Beyond this threshold the devices are considered different (same value
-        used for active and reactive power)
+        t, lp, m : Arguments to be passed to utils.match_power (if provided)
 
         Returns
         -------
@@ -266,7 +264,9 @@ class Appliance(object):
         distance = 1e10
         index = -1
         for i in range(s2.shape[0]):
-            match, d = utils.match_power(s1[0, :], s2[i, :], active_only=False)
+            match, d = utils.match_power(s1[0, :], s2[i, :],
+                                         active_only=False,
+                                         t=t, lp=lp, m=m)
             if d < distance:
                 distance = d
                 index = i

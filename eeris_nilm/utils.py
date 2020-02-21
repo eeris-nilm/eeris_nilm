@@ -124,7 +124,7 @@ def preprocess_data(data):
     return out
 
 
-def match_power(p1, p2, active_only=True, t=35.0):
+def match_power(p1, p2, active_only=True, t=35.0, lp=1000, m=0.05):
     """
     Match power consumption p1 against p2 according to Hart's algorithm.
 
@@ -134,7 +134,11 @@ def match_power(p1, p2, active_only=True, t=35.0):
     p1, p2 : 1x2 Numpy arrays (active and reactive power).
     active_only : Boolean indicating if match should take into account only
     active power or both active and reactive power
-    t : Float used to determine whether there is a match or no
+    t : Float used to determine whether there is a match or no. If the
+    difference is over t, then there is no match
+    lp : Large power threshold. If the maximum active power of p1 and p2 is over
+    this value, then a percentage is used for matching, instead of t.
+    m : The matching percentage used for large active power values.
 
     Returns
     -------
@@ -147,12 +151,12 @@ def match_power(p1, p2, active_only=True, t=35.0):
     # TODO: Check and enforce signature shapes
     if p1[0] < 0.0 or p2[0] < 0.0:
         raise ValueError('Active power must be positive')
-    if max((p1[0], p2[0])) >= 1000:
-        t_active = 0.05 * p2[0]
+    if max((p1[0], p2[0])) >= lp:
+        t_active = m * p2[0]
     else:
         t_active = t
-    if max((np.fabs(p1[1]), np.fabs(p2[1]))) >= 1000:
-        t_reactive = 0.05 * p2[1]
+    if max((np.fabs(p1[1]), np.fabs(p2[1]))) >= lp:
+        t_reactive = m * p2[1]
     else:
         t_reactive = t
     T = np.fabs(np.array([t_active, t_reactive]))
