@@ -39,7 +39,7 @@ class Hart85eeris(object):
     # little
 
     # Some of the variables below could be parameters
-    BUFFER_SIZE_SECONDS = 5 * 3600
+    BUFFER_SIZE_SECONDS = 24 * 3600
 
     # Limiters/thresholds
     MAX_WINDOW_DAYS = 100
@@ -47,9 +47,9 @@ class Hart85eeris(object):
     MAX_DISPLAY_SECONDS = 10 * 3600
     STEADY_THRESHOLD = 15
     SIGNIFICANT_EDGE = 50
-    STEADY_SAMPLES_NUM = 7
+    STEADY_SAMPLES_NUM = 5
     MATCH_THRESHOLD = 35
-    MAX_MATCH_THRESHOLD_DAYS = 1
+    MAX_MATCH_THRESHOLD_DAYS = 2
     EDGES_CLEAN_HOURS = 6
     STEADY_CLEAN_DAYS = 15
     MATCHES_CLEAN_DAYS = 3 * 365   # Unused for now
@@ -65,12 +65,15 @@ class Hart85eeris(object):
     BACKGROUND_UPDATE_DAYS = 15  # Use past days for background estimation
     BACKGROUND_UPDATE_PERIOD_HOURS = 1
 
-    def __init__(self, installation_id, nominal_voltage=230.0):
+    def __init__(self, installation_id, nominal_voltage=230.0,
+                 batch_mode=False):
         # Almost all variables are needed as class members, to support streaming
         # support.
 
         # Power system parameters
         self.nominal_voltage = nominal_voltage
+        # Operate in batch mode? (Does not clean up edges etc)
+        self.batch_mode = batch_mode
 
         # Running state variables
 
@@ -199,11 +202,12 @@ class Hart85eeris(object):
                                           nominal_voltage=self.nominal_voltage))
         # Data pre-processing (remove duplicates, resample to 1s)
         self._buffer = utils.preprocess_data(self._buffer)
-        # Keep only the last BUFFER_SIZE_SECONDS of the buffer. Should this be
-        # done before preprocesssing?
-        start_ts = self._buffer.index[-1] - \
-            pd.offsets.Second(self.BUFFER_SIZE_SECONDS - 1)
-        self._buffer = self._buffer.loc[self._buffer.index >= start_ts]
+        # Keep only the last BUFFER_SIZE_SECONDS of the buffer, if batch mode is
+        # disabled. Should this be done before preprocesssing?
+        if not self.batch_mode:
+            start_ts = self._buffer.index[-1] - \
+                pd.offsets.Second(self.BUFFER_SIZE_SECONDS - 1)
+            self._buffer = self._buffer.loc[self._buffer.index >= start_ts]
         if self.last_processed_ts is None:
             # We're just starting
             self._data = self._buffer
@@ -353,9 +357,10 @@ class Hart85eeris(object):
         if len(matches) < self.MIN_EDGES_STATIC_CLUSTERING:
             self._lock.release()
             return
-        start_ts = matches['start'].iloc[-1] - \
-            pd.offsets.Day(self.CLUSTER_DATA_DAYS)
-        matches = matches.loc[matches['start'] > start_ts]
+        if not self.batch_mode:
+            start_ts = matches['start'].iloc[-1] - \
+                pd.offsets.Day(self.CLUSTER_DATA_DAYS)
+            matches = matches.loc[matches['start'] > start_ts]
         matches1 = matches.copy()
         matches = matches[['active', 'reactive']].values
         # Apply DBSCAN.
@@ -391,7 +396,8 @@ class Hart85eeris(object):
             a = appliance.Appliance(appliance_id, name, category,
                                     signature=signature)
             ml = matches1.iloc[d.labels_ == l, :]
-            # Remove overlapping matches
+            # Remove overlapping matches. This is NOT included in Hart's
+            # original algorithm, but seems to help.
             ml = utils.remove_overlapping_matches(ml)
             a.activations = a.activations.append(ml[['start', 'end', 'active']],
                                                  ignore_index=True, sort=True)
@@ -435,6 +441,10 @@ class Hart85eeris(object):
         # Clean marked edges
         self._edges.drop(self._edges.loc[self._edges['mark']].index,
                          inplace=True)
+        # If batch mode is enabled, there's nothing else left to do.
+        if self.batch_mode:
+            return
+        # Otherwise clean-up old edges and steady states.
         # Clean edges that are too far back in time
         droplist = []
         for idx, e in self._edges.iterrows():
@@ -650,7 +660,7 @@ class Hart85eeris(object):
     def _match_helper(self, start, end, active):
         """
         Helper function to update the "explained" power consumption _ymatch
-        based on a pair of matched edges.
+        based on a pair of matched edges. For debugging/demonstration purposes.
         """
         end_sec_inv = (self.last_processed_ts - end).seconds
         if end_sec_inv > self.MAX_DISPLAY_SECONDS:

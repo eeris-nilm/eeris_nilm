@@ -165,7 +165,7 @@ class Appliance(object):
             seg_values = seg_values[aidx[:20000]]
         # Cluster the values.
         # TODO: Decide what to do with hardcoded cluster parameters
-        d = sklearn.cluster.DBSCAN(eps=30, min_samples=3, metric='euclidean',
+        d = sklearn.cluster.DBSCAN(eps=35.0, min_samples=3, metric='euclidean',
                                    metric_params=None, algorithm='auto')
         d.fit(seg_values)
         # TODO: Negative values are outliers. Do we need those? What if they are

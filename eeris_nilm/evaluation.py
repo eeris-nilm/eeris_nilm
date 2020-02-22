@@ -16,6 +16,7 @@ limitations under the License.
 
 import numpy as np
 import os.path
+import logging
 from sklearn import metrics
 from eeris_nilm import appliance
 from eeris_nilm.datasets import redd
@@ -149,13 +150,11 @@ def jaccard_index(intervals1, intervals2):
     return j_index
 
 
-# TODO: Documentation, break this function into a dataset-specific component and
-# TODO: Examine the steady-state alternative as well
-# a general-purpose component
 def hart_redd_evaluation(redd_path, house='house_1',
                          date_start='2011-04-17T00:00',
                          date_end='2011-05-30T23:59',
-                         mode='edges'):
+                         mode='edges',
+                         step=None):
     """
     Evaluate performance of Hart's algorithm to the REDD dataset.
 
@@ -180,7 +179,14 @@ def hart_redd_evaluation(redd_path, house='house_1',
     Method to compute the ground truth power states. In 'edges' mode (the
     default), edges and Hart's algorithm are used to determine the transitions
     of the appliance. In 'steady_states' method, the detected steady states of
-    the appliance are used instead
+    the appliance are used instead. This argument is directly passed to the
+    'hart_evaluation' function.
+
+    step : int
+    Process the data in batches of 'step' seconds at a time. If None, then the
+    entire dataset is loaded into memory. WARNING: No memory checks are
+    performed, so please make sure that the dataset can fit into memory.  This
+    argument is directly passed to the 'hart_evaluation' function.
 
     Returns
     -------
@@ -202,18 +208,76 @@ def hart_redd_evaluation(redd_path, house='house_1',
     Root mean squared error values, one for each ground truth appliance
 
     """
-    # TODO: Pydoc string
     path = os.path.join(redd_path, house)
     data, labels = redd.read_redd(path, date_start=date_start,
                                   date_end=date_end)
+    return hart_evaluation(data, labels, mode='edges', step=None)
+
+
+# TODO: Evaluate using best matching instead of greedy matching
+def hart_evaluation(data, labels, mode='edges', step=None):
+    """
+    Evaluate performance of Hart's algorithm to the REDD dataset.
+
+    Parameters
+    ----------
+
+    data: Dictionary of pandas.DataFrame objects
+    One data['mains'] object is expected, corresponding to the installation
+    meter. Additional objects correspond to meters of individual appliances and
+    are used as ground truth (except those that have a label 'mains', see
+    below).
+
+    labels: pandas.Dataframe
+    A dataframe with a 'label' column, indicating the appliance category
+    corresponding to each of the dataframes in the 'data' dictionary. The
+    dataframes with label 'mains' are not used for evaluation.
+
+    mode : str, can be 'edges' or 'steady_states'
+    Method to compute the ground truth power states. In 'edges' mode (the
+    default), edges and Hart's algorithm are used to determine the transitions
+    of the appliance. In 'steady_states' method, the detected steady states of
+    the appliance are used instead
+
+    step : int
+    Process the data in batches of 'step' seconds at a time. If None, then the
+    entire dataset is loaded into memory. WARNING: No memory checks are
+    performed, so please make sure that the dataset can fit into memory.
+
+    Returns
+    -------
+    gt_appliances : Dictionary of detected ground truth appliances. Appliance
+    names are the keys (in the form name_id, where id is an appliance counter).
+
+    eval_g : Dictionary of numpy arrays, one for each ground truth appliance
+    The data that is used for evaluation (normalized, resampled, and segmented
+    for the duration where estimates from NILM/mains are available)
+
+    eval_est : Dictionary of numpy arrays, one for each detected appliance
+    The data that is used for evaluation (normalized, resampled, and segmented
+    for the duration where ground truth data are available)
+
+    jaccard : Dictionary of float
+    Jaccard index values, one for each ground truth appliance
+
+    rmse : Dictionary of float
+    Root mean squared error values, one for each ground truth appliance
+
+    """
     # Build the model
-    model = hart.Hart85eeris(installation_id=1)
-    step = 6 * 3600
-    for i in range(0, data['mains'].shape[0], step):
-        if i % 3600 == 0:
-            print("Hour count: %d" % (i / 3600))
-        y = data['mains'].iloc[i:min([i+step, data['mains'].shape[0]])]
+    if step is None:
+        model = hart.Hart85eeris(installation_id=1, batch_mode=True)
+        y = data['mains']
         model.update(y)
+    else:
+        # Perhaps this should be batch as well, if step is larger than a few
+        # hours.
+        model = hart.Hart85eeris(installation_id=1, batch_mode=False)
+        for i in range(0, data['mains'].shape[0], step):
+            if i % 3600 == 0:
+                logging.debug("Hour count: %d" % (i / 3600))
+            y = data['mains'].iloc[i:min([i+step, data['mains'].shape[0]])]
+            model.update(y)
     print('Finished')
 
     # Create ground truth appliances (based on edges or steady states)
@@ -225,18 +289,27 @@ def hart_redd_evaluation(redd_path, house='house_1',
         if category == 'mains':
             continue
         name = category + '_' + str(i)
-        model_g = hart.Hart85eeris(installation_id=1)
         g = appliance.Appliance(i, name, category)
         if mode == 'edges':
             # Train a Hart model
-            for j in range(0, data[i].shape[0], step):
-                if j % 3600 == 0:
-                    print('Appliance %s, hour count %d' % (name, j/3600))
-                y = data[i].iloc[j:min([j+step, data[i].shape[0]])]
-                # Insert face reactive and voltage columns.
+            if step is None:
+                # Process everything at once
+                model_g = hart.Hart85eeris(installation_id=1, batch_mode=True)
+                y = data[i]
                 y.insert(1, 'reactive', 0.0)
                 y.insert(1, 'voltage', g.nominal_voltage)
                 model_g.update(y)
+            else:
+                # Step-processing.
+                model_g = hart.Hart85eeris(installation_id=1, batch_mode=False)
+                for j in range(0, data[i].shape[0], step):
+                    if j % 3600 == 0:
+                        print('Appliance %s, hour count %d' % (name, j/3600))
+                    y = data[i].iloc[j:min([j+step, data[i].shape[0]])]
+                    # Insert face reactive and voltage columns.
+                    y.insert(1, 'reactive', 0.0)
+                    y.insert(1, 'voltage', g.nominal_voltage)
+                    model_g.update(y)
             # Signatures of detected appliances
             for a in model_g.appliances.values():
                 g.append_signature(a.signature)
@@ -276,9 +349,7 @@ def hart_redd_evaluation(redd_path, house='house_1',
         if mapping_g[g]:
             # Create one estimated power consumption curve per ground-truth
             # appliance
-            est_power[g] = utils.power_curve_from_activations(mapping_g[g],
-                                                              start=date_start,
-                                                              end=date_end)
+            est_power[g] = utils.power_curve_from_activations(mapping_g[g])
         else:
             est_power[g] = None
     # TODO: matched variable in following

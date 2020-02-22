@@ -26,7 +26,8 @@ redd_path = 'tests/data/'
 appliances, eval_g, eval_est, jaccard, rmse = \
     evaluation.hart_redd_evaluation(redd_path,  house='house_1',
                                     date_start='2011-04-18T00:00',
-                                    date_end='2011-06-01T23:59')
+                                    date_end='2011-06-01T23:59',
+                                    step=None)
 for name, g in appliances.items():
     print("Appliance %s" % (name))
     plt.plot(eval_g[g], 'r')
