@@ -66,6 +66,7 @@ def mape(curve1, curve2):
     return e
 
 
+# NOT USED YET
 def jaccard_index(intervals1, intervals2):
     """ Compute the Jaccard index (intersection over union) for the estimated
     durations of activation of an appliance. A value close to 1 indicates
@@ -153,7 +154,54 @@ def jaccard_index(intervals1, intervals2):
 # a general-purpose component
 def hart_redd_evaluation(redd_path, house='house_1',
                          date_start='2011-04-17T00:00',
-                         date_end='2011-05-30T23:59'):
+                         date_end='2011-05-30T23:59',
+                         mode='edges'):
+    """
+    Evaluate performance of Hart's algorithm to the REDD dataset.
+
+    Parameters
+    ----------
+
+    redd_path : str
+    Path to the REDD dataset
+
+    house : str
+    REDD house name
+
+    date_start : str
+    Start date. If earlier than the earliest date, the start time of the data
+    is used.
+
+    date_end : str
+    End date. If later than the latest date, the end time of the data
+    is used.
+
+    mode : str, can be 'edges' or 'steady_states'
+    Method to compute the ground truth power states. In 'edges' mode (the
+    default), edges and Hart's algorithm are used to determine the transitions
+    of the appliance. In 'steady_states' method, the detected steady states of
+    the appliance are used instead
+
+    Returns
+    -------
+    gt_appliances : Dictionary of detected ground truth appliances. Appliance
+    names are the keys (in the form name_id, where id is an appliance counter).
+
+    eval_g : Dictionary of numpy arrays, one for each ground truth appliance
+    The data that is used for evaluation (normalized, resampled, and segmented
+    for the duration where estimates from NILM/mains are available)
+
+    eval_est : Dictionary of numpy arrays, one for each detected appliance
+    The data that is used for evaluation (normalized, resampled, and segmented
+    for the duration where ground truth data are available)
+
+    jaccard : Dictionary of float
+    Jaccard index values, one for each ground truth appliance
+
+    rmse : Dictionary of float
+    Root mean squared error values, one for each ground truth appliance
+
+    """
     # TODO: Pydoc string
     path = os.path.join(redd_path, house)
     data, labels = redd.read_redd(path, date_start=date_start,
@@ -168,7 +216,7 @@ def hart_redd_evaluation(redd_path, house='house_1',
         model.update(y)
     print('Finished')
 
-    # Create ground truth appliances (based on edges)
+    # Create ground truth appliances (based on edges or steady states)
     gt_appliances = dict()
     power = dict()
     for i in labels.index:
@@ -179,18 +227,21 @@ def hart_redd_evaluation(redd_path, house='house_1',
         name = category + '_' + str(i)
         model_g = hart.Hart85eeris(installation_id=1)
         g = appliance.Appliance(i, name, category)
-        # Train a Hart model
-        for j in range(0, data[i].shape[0], step):
-            if j % 3600 == 0:
-                print('Appliance %s, hour count %d' % (name, j/3600))
-            y = data[i].iloc[j:min([j+step, data[i].shape[0]])]
-            # Insert face reactive and voltage columns.
-            y.insert(1, 'reactive', 0.0)
-            y.insert(1, 'voltage', g.nominal_voltage)
-            model_g.update(y)
-        # Signatures of detected appliances
-        for a in model_g.appliances.values():
-            g.append_signature(a.signature)
+        if mode == 'edges':
+            # Train a Hart model
+            for j in range(0, data[i].shape[0], step):
+                if j % 3600 == 0:
+                    print('Appliance %s, hour count %d' % (name, j/3600))
+                y = data[i].iloc[j:min([j+step, data[i].shape[0]])]
+                # Insert face reactive and voltage columns.
+                y.insert(1, 'reactive', 0.0)
+                y.insert(1, 'voltage', g.nominal_voltage)
+                model_g.update(y)
+            # Signatures of detected appliances
+            for a in model_g.appliances.values():
+                g.append_signature(a.signature)
+        elif mode == 'steady_states':
+            g.signature_from_data_steady_states(data[i])
         # Failed to create signature
         if g.signature is None:
             continue
