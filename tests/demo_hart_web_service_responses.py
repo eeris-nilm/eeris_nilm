@@ -1,5 +1,5 @@
 """
-Copyright 2019 Christos Diou
+Copyright 2020 Christos Diou
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -18,11 +18,40 @@ limitations under the License.
 import sys
 import time
 import requests
+import threading
 import json
 import logging
 from eeris_nilm.datasets import eco
 
 logging.basicConfig(level=logging.DEBUG)
+
+# Start mongodb and uwsgi before running this demo.
+# uwsgi uwsgi_nilm.ini
+
+
+# Function to initiate clustering at regular intervals
+def request_clustering(nilm_url, stop_event, interval=60):
+    clustering_url = nilm_url + '/clustering'
+    while not stop_event.is_set():
+        time.sleep(interval)
+        r = requests.post(clustering_url)
+        if r.status_code != 200:
+            print("Clustering: Received HTTP %d" % (r.status_code))
+    print('Clustering requests thread stopping.')
+
+
+# Function to request appliance activations at regular intervals
+def request_activations(nilm_url, stop_event, interval=90):
+    activations_url = nilm_url + '/activations'
+    while not stop_event.is_set():
+        time.sleep(interval)
+        r = requests.get(activations_url)
+        if r.status_code != 200:
+            print("Activations: Received HTTP %d" % (r.status_code))
+        resp = json.loads(r.text)
+        print("Activations response: %s" % (resp))
+    print('Activations requests thread stopping.')
+
 
 p = 'tests/data/01_sm_csv/01'
 date_start = '2012-06-15T00:00'
@@ -36,6 +65,18 @@ nnst_url = 'http://localhost:8000/installation/1/model'
 
 # Prepare data
 phase_list, power = eco.read_eco(p, date_start, date_end)
+
+# Initiate clustering and activation threads
+stop_event = threading.Event()
+cluster_requests_thread = threading.Thread(target=request_clustering,
+                                           name='clustering',
+                                           args=(nilm_url, stop_event))
+cluster_requests_thread.start()
+activation_requests_thread = threading.Thread(target=request_activations,
+                                              name='activations',
+                                              args=(nilm_url, stop_event))
+activation_requests_thread.start()
+
 
 # Main loop
 for i in range(0, power.shape[0], step):
@@ -53,3 +94,6 @@ for i in range(0, power.shape[0], step):
     live = r.text
     print("GET response (live): %s" % (live))
     time.sleep(0.1)
+stop_event.set()
+cluster_requests_thread.join()
+activation_requests_thread.join()

@@ -35,6 +35,7 @@ class Hart85eeris(object):
     """ Modified implementation of Hart's NILM algorithm. """
     # TODO:
     # - remove the class variables that are not needed
+    # - Some of the 'constant' variables should be model parameters
     # - all "live" data should be part of a different class to simplify things a
     # little
 
@@ -57,8 +58,7 @@ class Hart85eeris(object):
 
     # For clustering
     # TODO: Check the clustering values
-    CLUSTER_STEP_DAYS = 1  # Update every day
-    CLUSTER_FIRST_DAYS = 1  # Period before first clustering
+    CLUSTER_STEP_HOURS = 1  # Cluster update frequency, in hours
     CLUSTER_DATA_DAYS = 30 * 3  # Use last 3 months for clustering
     MIN_EDGES_STATIC_CLUSTERING = 5  # DBSCAN parameter
     LARGE_POWER = 1e6  # Large power consumption
@@ -790,12 +790,18 @@ class Hart85eeris(object):
         """
         pass
 
-    def force_clustering(self):
+    def force_clustering(self, start_thread=False):
         """
         This function forces recomputation of appliance models using the
         detected and matched edges (after clustering) and returns the activation
         histories of each appliance. Clustering takes place in a separate
         thread.
+
+        Parameters
+        ----------
+
+        start_thread : bool
+        Threaded version, where a separate clustering thread is started
 
         Returns
         -------
@@ -806,6 +812,10 @@ class Hart85eeris(object):
         """
         # We acquire lock here as well since this function is public and may be
         # called arbitrarily
+        if not start_thread:
+            self._static_cluster()
+            return
+        # With threads
         if (self._clustering_thread is None) or \
            (not self._clustering_thread.is_alive()):
             self._clustering_thread = \
@@ -859,9 +869,8 @@ class Hart85eeris(object):
             td = self.last_processed_ts - self._start_ts
         self._lock.release()
 
-        # if td.days >= self.CLUSTER_STEP_DAYS:
-        if td.seconds >= 5:
-            # self.force_clustering()
+        if td.total_seconds()/3600.0 >= self.CLUSTER_STEP_HOURS:
+            self.force_clustering()
             # In case we don't want threads (for debugging)
-            self._static_cluster()
+            # self._static_cluster()
         time.sleep(0.01)

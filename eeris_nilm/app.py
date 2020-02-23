@@ -37,12 +37,11 @@ def create_app(dburl, dbname):
     # Gunicorn expects the 'application' name
     api = falcon.API()
     # NILM
-    api.add_route('/nilm/{inst_id}', eeris_nilm.nilm.NILM(mdb))
+    nilm = eeris_nilm.nilm.NILM(mdb)
+    api.add_route('/nilm/{inst_id}', nilm)
     # TODO: Refactor code. Threads do not work with wsgi.
-    api.add_route('/nilm/{inst_id}/clustering', eeris_nilm.nilm.NILM(mdb),
-                  suffix='clustering')
-    api.add_route('/nilm/{inst_id}/activations', eeris_nilm.nilm.NILM(mdb),
-                  suffix='activations')
+    api.add_route('/nilm/{inst_id}/clustering', nilm, suffix='clustering')
+    api.add_route('/nilm/{inst_id}/activations', nilm, suffix='activations')
     # Installation
     api.add_route('/installation/{inst_id}/model',
                   eeris_nilm.installation.InstallationManager(mdb),

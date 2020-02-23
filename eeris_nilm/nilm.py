@@ -155,9 +155,12 @@ class NILM(object):
 
     def on_get(self, req, resp, inst_id):
         """
-        On getn, the service returns a document describing the status of a
+        On get, the service returns a document describing the status of a
         specific installation.
         """
+        if inst_id not in self._model_lock_id.keys():
+            self._model_lock_id[inst_id] = self._model_lock_num
+            self._model_lock_num += 1
         uwsgi.lock(self._model_lock_id[inst_id])
         model = self._load_model(inst_id)
         logging.debug('WSGI lock (GET)')
@@ -236,10 +239,13 @@ class NILM(object):
         Starts a clustering thread on the target model
         """
         # Load the model, if not loaded already
+        if inst_id not in self._model_lock_id.keys():
+            self._model_lock_id[inst_id] = self._model_lock_num
+            self._model_lock_num += 1
         uwsgi.lock(self._model_lock_id[inst_id])
         model = self._load_model(inst_id)
         logging.debug('WSGI lock (clustering)')
-        if model.force_clustering():
+        if model.force_clustering(start_thread=True):
             resp.status = falcon.HTTP_200
         else:
             # Conflict
@@ -253,6 +259,9 @@ class NILM(object):
         Requests the list of activations for the appliances of an installation.
         """
         # Load the model, if not loaded already
+        if inst_id not in self._model_lock_id.keys():
+            self._model_lock_id[inst_id] = self._model_lock_num
+            self._model_lock_num += 1
         uwsgi.lock(self._model_lock_id[inst_id])
         model = self._load_model(inst_id)
         payload = []
