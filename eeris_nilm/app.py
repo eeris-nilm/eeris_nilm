@@ -23,6 +23,8 @@ import logging
 
 logging.basicConfig(level=logging.DEBUG)
 
+CLUSTER_PERIOD_SECONDS = 3600
+
 
 def create_app(dburl, dbname):
     # DB connection
@@ -42,6 +44,7 @@ def create_app(dburl, dbname):
     # TODO: Refactor code. Threads do not work with wsgi.
     api.add_route('/nilm/{inst_id}/clustering', nilm, suffix='clustering')
     api.add_route('/nilm/{inst_id}/activations', nilm, suffix='activations')
+    # api.add_route('/nilm/{inst_id}/newdevice', nilm, suffix='newdevice')
     # Installation
     api.add_route('/installation/{inst_id}/model',
                   eeris_nilm.installation.InstallationManager(mdb),

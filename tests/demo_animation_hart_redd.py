@@ -34,7 +34,7 @@ class Demo(object):
     def __init__(self, path, date_start, date_end, ax, axt,
                  model_path_r=None, model_path_w=None):
         # Load data
-        self.step = 100
+        self.step = 3
         self.data, self.labels = redd.read_redd(path, date_start, date_end,
                                                 get_channels=False)
         self.power = self.data['mains']
@@ -153,7 +153,7 @@ class Demo(object):
             self.line_match
 
 
-logging.basicConfig(level=logging.DEBUG)
+# logging.basicConfig(level=logging.DEBUG)
 
 # Setup
 p = 'tests/data/house_1'
