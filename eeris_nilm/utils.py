@@ -16,7 +16,7 @@ limitations under the License.
 
 import numpy as np
 import pandas as pd
-
+import json
 
 def get_segments(signal, mask, only_true=True):
     """
@@ -272,3 +272,20 @@ def remove_overlapping_matches(matches):
         out.drop(index=idx, inplace=True)
     return out
     # TODO: Merge partially overlapping segments?
+
+
+def get_data_from_cenote_response(resp):
+    """
+    Convert response from cenote system to pandas.DataFrame that can be used by
+    eeris_nilm.
+    """
+    rd = json.loads(resp.text)
+    data = pd.DataFrame(rd['results'])
+    data = data.drop(['installationid', 'uuid', 'cenote$timestamp',
+                      'cenote$id'], axis=1)
+    data['cenote$created_at'] = pd.to_datetime(data['cenote$created_at'],
+                                               unit='ms', origin='unix')
+    data = data.rename(columns={'cenote$created_at': 'timestamp'})
+    data = data.set_index('timestamp')
+    data.index.name = None
+    return data

@@ -79,7 +79,12 @@ def create_app(dburl, dbname, act_url=None, recomp_url=None,
     # api = falcon.API(middleware=[auth_middleware])
     api = falcon.API()
     # NILM
-    nilm = eeris_nilm.nilm.NILM(mdb, thread=thread)
+    # orchestrator_url = 'http://83.212.104.172:8001/'
+    orchestrator_url = 'http://localhost:8001/'
+    act_url = orchestrator_url + 'historical/'
+    comp_url = orchestrator_url + 'historical/'
+    nilm = eeris_nilm.nilm.NILM(mdb, thread=thread, act_url=act_url,
+                                comp_url=comp_url)
     api.add_route('/nilm/{inst_id}', nilm)
     api.add_route('/nilm/{inst_id}/clustering', nilm, suffix='clustering')
     api.add_route('/nilm/{inst_id}/activations', nilm, suffix='activations')

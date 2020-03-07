@@ -22,7 +22,7 @@ import matplotlib.animation as animation
 from matplotlib.table import table
 from matplotlib.font_manager import FontProperties
 from eeris_nilm.datasets import redd
-from eeris_nilm.algorithms import hart
+from eeris_nilm.algorithms import livehart
 import datetime
 import logging
 
@@ -59,7 +59,7 @@ class Demo(object):
             else:
                 new_model = False  # Not needed, for emphasis/readability
         if new_model:
-            self.model = hart.Hart85eeris(installation_id=1)
+            self.model = livehart.LiveHart(installation_id=1)
             self.start_ts = date_start
         self.model_path_w = model_path_w
         self.current_sec = 0

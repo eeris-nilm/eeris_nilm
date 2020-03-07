@@ -28,6 +28,7 @@ import atexit
 import requests
 # import multiprocessing
 
+from eeris_nilm import utils
 from eeris_nilm.algorithms import livehart
 
 # TODO: Refactoring to break into eeris-specific and general-purpose components
@@ -306,6 +307,10 @@ class NILM(object):
         step : int
         Step, in seconds to use for calculations
         """
+        if self._computations_url is None:
+            logging.debug(("No URL has been provided for past data.",
+                           "Model re-computation is not supported."))
+            return
         if inst_id not in self._model_lock_id.keys():
             self._model_lock_id[inst_id] = self._model_lock_num
             self._model_lock_num += 1
@@ -328,13 +333,14 @@ class NILM(object):
         model = self._models[inst_id]
         # Recomputation loop
         for ts in range(start_ts, end_ts, step):
-            url = self._computations_url + '/' + inst_id
+            url = self._computations_url + inst_id
+            # Endpoint expects timestamp in milliseconds since unix epoch
             params = {
-                "start": ts,
-                "end": ts + step
+                "start": ts * 1000,
+                "end": (ts + step) * 1000
             }
             r = requests.get(url, params)
-            data = pd.read_json(r.text)
+            data = utils.get_data_from_cenote_response(r)
             model.update(data)
             self._put_count[inst_id] += 1
             if (self._put_count[inst_id] % self.STORE_PERIOD == 0):
@@ -384,7 +390,9 @@ class NILM(object):
         if (inst_id not in self._models.keys()):
             inst_doc = self._mdb.models.find_one({"meterId": inst_id})
             if inst_doc is None:
-                modelstr = dill.dumps(livehart.LiveHart(installation_id=inst_id))
+                modelstr = dill.dumps(
+                    livehart.LiveHart(installation_id=inst_id)
+                )
                 inst_doc = {'meterId': inst_id,
                             'lastUpdate':
                             dt.datetime.now().strftime('%Y-%m-%dT%H:%M:%S%z'),
@@ -506,20 +514,21 @@ class NILM(object):
         Recompute an installation model based on all available data.
 
         Request has the following format:
-        {
-            'start' : int, // Start timestamp, in seconds since UNIX epoch
-            'end' : int, // End timestamp, in seconds since UNIX epoch
-            'step' : int // Recomputation step, in seconds
-        }
+        URL?start=$start_timestamp&end=$end_timestamp$&step=$step_timestamp
+        where timestamps are in seconds since unix epoch.
 
         The old model is discarded and a new model is recomputed based on data
         available between start and end timestamps.
         """
         # Start recomputation thread
-        data = json.loads(req.stream)
-        start_ts = int(data['start'])
-        end_ts = int(data['end'])
-        step = int(data['step'])
+        if 'start' not in req.params or \
+           'end' not in req.params or \
+           'step' not in req.params:
+            resp.status = falcon.HTTP_400
+            resp.body = "Incorrect query string in request"
+        start_ts = req.params['start']
+        end_ts = req.params['end']
+        step = req.params['step']
         name = "recomputation_%s" % (inst_id)
         self._recomputation_thread = threading.Thread(
             target=self._recompute_model, name=name,
