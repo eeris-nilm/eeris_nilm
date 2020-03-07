@@ -1,5 +1,5 @@
 """
-Copyright 2019 Christos Diou
+Copyright 2020 Christos Diou
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -48,6 +48,9 @@ class Appliance(object):
         self.p_signature = signature  # Previous signature (for running average)
         # Should we keep data regarding activation of this applicance?
         self.store_activations = True
+        # Helper variable to keep track of which activations have been provided
+        # to external callers
+        self.last_returned_end_ts = None
         # Time segments of specific appliance states (corresponding to rows of
         # the signature matrix). The active power at that state is also
         # recorded.
@@ -76,6 +79,39 @@ class Appliance(object):
                                 'active': active}, index=[0])
         self.activations = self.activations.append(df, ignore_index=True,
                                                    sort=True)
+
+    def return_new_activations(self, update_ts=False):
+        """
+        Return activations that have been detected and have not been returned
+        before.
+
+        Parameters
+        ----------
+        update_ts : bool
+        Whether to set the last update timestamp (if set, then subsequent calls
+        will not return the activations that have been already returned)
+
+        Returns
+        -------
+        out : pandas.DataFrame instance with 'start', 'end',
+        'active' columns.
+        """
+        if self.last_returned_end_ts is None:
+            activations = self.activations
+        else:
+            idx = self.activations['end'] > self.last_returned_end_ts
+            activations = self.activations.loc[idx, :]
+        activations = activations.sort_values('end', ascending=True,
+                                              ignore_index=True)
+        if update_ts:
+            self.last_returned_end_ts = activations[-1]['end']
+        return activations
+
+    def reset_activations_track(self):
+        """
+        Reset the tracked activations
+        """
+        self.last_returned_end_ts = None
 
     def append_signature(self, signature):
         """
@@ -149,7 +185,7 @@ class Appliance(object):
         mask = scipy.convolve(npdata[:, 0], sobel, mode='same') < threshold
         segments = utils.get_segments(npdata, mask)
         # Get the average value of each segment
-        seg_values = np.array([np.mean(s) for s in segments])
+        seg_values = np.array([np.mean(seg) for seg in segments])
         # Make sure shape is appropriate for dbscan
         if len(seg_values.shape) == 1:
             if seg_values.shape[0] > 1:
@@ -319,7 +355,6 @@ class Appliance(object):
         considered the same in a_from and a_to, keeping the ids of a_to. The
         dictionary also includes appliances that were not mapped (without
         changing their appliance_id).
-
         """
         # TODO: Works only for two-state appliances, assuming signature encodes
         # only the 'On' state
@@ -367,26 +402,8 @@ class Appliance(object):
                 a[m]._mapped = True
                 if copy_activations:
                     a[m].activations = a_from[k].activations.copy()
+                    a[m].last_returned_end_ts = a_from[k].last_returned_end_ts
             else:
                 # Unmapped new appliances
                 a[k] = a_from[k]
         return a
-
-    # def distance(app1, app2):
-    #     """
-    #     Function defining the distance (or dissimilarity) between two
-    #     appliances. For now this is the L2 distance of the first row of their
-    #     signatures.
-
-    #     Parameters
-    #     ----------
-    #     app1: First Appliance object
-
-    #     app2: Second Appliance object
-
-    #     Returns
-    #     -------
-    #     out: Distance between the appliances
-
-    #     """
-    #     return LA.norm(app1.signature - app2.signature)

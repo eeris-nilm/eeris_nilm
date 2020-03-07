@@ -21,8 +21,17 @@ import dill
 import json
 import logging
 import time
-import uwsgi  # Experiment with uwsgi locks. Threading doesn't work
-from eeris_nilm.algorithms import hart
+import datetime
+import uwsgi  # Experiment with uwsgi locks. Can we replace with threading?
+import threading
+import atexit
+import requests
+# import multiprocessing
+
+from eeris_nilm.algorithms import livehart
+
+# TODO: Refactoring to break into eeris-specific and general-purpose components
+# TODO: Support for multiple processes for specified list of installation ids
 
 
 class NILM(object):
@@ -31,11 +40,32 @@ class NILM(object):
     maintains a document of the state of appliances in an installation.
     """
 
-    # How often (every n PUT requests) should we store the document
+    # How often (every n PUT requests) should we store the model
     # persistently?
     STORE_PERIOD = 10
 
-    def __init__(self, mdb, response='cenote'):
+    def __init__(self, mdb, act_url=None, comp_url=None,
+                 response='cenote', thread=False):
+        """
+        Parameters:
+        ----------
+
+        mdb: pymongo.database.Database
+        PyMongo database instance for persistent storage and loading
+
+        act_url: URL where detected activations will be submitted. If None, they
+        are simply printed on the debug output (through logging.debug)
+
+        comp_url: URL where the data are requested from for model recomputation
+        purposes. If None, then no recomputation is possible.
+
+        response: Selected response format. Default is 'cenote' for integration
+        with the eeRIS system
+
+        thread: bool
+        Whether to start a thread for clustering and activation detection at
+        startup
+        """
         # Add state variables as needed
         self._mdb = mdb
         self._models = dict()
@@ -44,6 +74,109 @@ class NILM(object):
         self._response = response
         self._model_lock_id = dict()
         self._model_lock_num = 1
+        self._recomputation_active = dict()
+        self._recomputation_thread = None
+        self._thread = None
+        self._activations_url = act_url  # Where to send device activations
+        self._computations_url = comp_url  # Recomputation data URL
+        if thread:
+            self._periodic_thread(period=60)
+            atexit.register(self._cancel_thread)
+
+    def _send_activations(self):
+        """
+        Send activations to service responsible for storing appliance
+        activation events
+
+        Returns:
+        -------
+
+        out : dictionary of strings
+        The responses of _activations_url, if it has been provided, otherwise a
+        list of json objects with the appliance activations for each
+        installation. Keys of the dictionary are the installation ids.
+        """
+        ret = {}
+        for inst_id, model in self._models.items():
+            if inst_id not in self._model_lock_id.keys():
+                self._model_lock_id[inst_id] = self._model_lock_num
+                self._model_lock_num += 1
+            uwsgi.lock(self._model_lock_id[inst_id])
+            payload = []
+            for a_k, a in model.appliances:
+                # For now, do not mark activations as sent (we'll do that only
+                # if data have been successfully sent)
+                activations = a.return_new_activations(update_ts=False)
+                for row in activations.itertuples():
+                    # Energy consumption in kWh
+                    # TODO: Correct consumption by reversing power normalization
+                    consumption = (row.end - row.start).seconds / 3600.0 * \
+                        row.active / 1000.0
+                    b = {
+                        "data":
+                        {
+                            "installationid": inst_id,
+                            "deviceid": a.appliance_id,
+                            "start": row.start.timestamp() * 1000,
+                            "end": row.end.timestamp() * 1000,
+                            "consumption": consumption,
+                            "algorithm_id": model.VERSION
+                        }
+                    }
+                    payload.append(b)
+            body = {
+                "payload": payload
+            }
+            # Send stuff
+            if self._activations_url is not None:
+                resp = requests.post(self._activations_url,
+                                     json=json.dumps(body))
+                if resp.status_code != falcon.HTTP_200:
+                    logging.debug(
+                        "Sending of activation data for %s failed: (%d, %s)" %
+                        (inst_id, resp.status_code, resp.text)
+                    )
+                    ret[inst_id] = resp
+                else:
+                    # Everything went well, mark the activations as sent
+                    ret[inst_id] = \
+                        json.dumps(a.return_new_activations(update_ts=True))
+            else:
+                ret[inst_id] = \
+                    json.dumps(a.return_new_activations(update_ts=True))
+            # Move on to the next installation
+            uwsgi.unlock(self._model_lock_id[inst_id])
+        return ret
+
+    def _cancel_thread(self):
+        """Stop clustering thread when the app terminates."""
+        if self._thread is not None:
+            self._thread.cancel()
+
+    def _periodic_thread(self, period=3600, clustering=False):
+        """
+        Start a background clustering thread which will perform clustering in
+        all loaded models at regular intervals.
+
+        Parameters
+        ----------
+        period : int
+        Call the clustering thread every 'period' seconds.
+
+        clustering : bool
+        Perform clustering or not.
+        """
+        logging.debug("Starting periodic thread.")
+        if clustering:
+            self.perform_clustering()
+            # Wait 5 minutes, in case clustering is completed within this time.
+            time.sleep(300)
+        # Send activations
+        act_result = self._send_activations()
+        logging.debug("Activations report:")
+        logging.debug(act_result)
+        # Submit new thread
+        self._thread = threading.Timer(period, target=self._periodic_thread)
 
     def _prepare_response_body(self, model):
         """ Wrapper function """
@@ -151,7 +284,71 @@ class NILM(object):
                 self._models[inst_id] = dill.loads(inst_doc['modelHart'])
                 self._model_lock_id[inst_id] = self._model_lock_num
                 self._model_lock_num += 1
+                self._recomputation_active[inst_id] = False
         return self._models[inst_id]
+
+    def _recompute_model(self, inst_id, start_ts, end_ts, step=6*3600):
+        """
+        Recompute a model from data provided by a service. Variations of this
+        routine can be created for different data sources.
+
+        Parameters
+        ----------
+        inst_id: str
+        Installation id whose model we wan to recompute
+
+        start_ts : int
+        Start timestamp in seconds since UNIX epoch
+
+        end_ts : int
+        End timestamp in seconds since UNIX epoch
+
+        step : int
+        Step, in seconds to use for calculations
+        """
+        if inst_id not in self._model_lock_id.keys():
+            self._model_lock_id[inst_id] = self._model_lock_num
+            self._model_lock_num += 1
+        uwsgi.lock(self._model_lock_id[inst_id])
+        self._recomputation_active[inst_id] = True
+        # Delete model from memory
+        self._models.pop(inst_id, None)
+        # Delete model from database
+        self._models.delete_one({'meterId': inst_id})
+        # Prepare new model
+        modelstr = dill.dumps(livehart.LiveHart(installation_id=inst_id))
+        inst_doc = {'meterId': inst_id,
+                    'lastUpdate':
+                    dt.datetime.now().strftime('%Y-%m-%dT%H:%M:%S%z'),
+                    'debugInstallation': True,
+                    'modelHart': modelstr}
+        self._mdb.models.insert_one(inst_doc)
+        self._models[inst_id] = dill.loads(inst_doc['modelHart'])
+        self._put_count[inst_id] = 0
+        model = self._models[inst_id]
+        # Recomputation loop
+        for ts in range(start_ts, end_ts, step):
+            url = self._computations_url + '/' + inst_id
+            params = {
+                "start": ts,
+                "end": ts + step
+            }
+            r = requests.get(url, params)
+            data = pd.read_json(r.text)
+            model.update(data)
+            self._put_count[inst_id] += 1
+            if (self._put_count[inst_id] % self.STORE_PERIOD == 0):
+                # Persistent storage
+                modelstr = dill.dumps(model)
+                upd = {'$set': {
+                    'meterId': inst_id,
+                    'lastUpdate': str(dt.datetime.now()),
+                    'debugInstallation': True,
+                    'modelHart': modelstr}
+                }
+                self._mdb.models.update_one({'meterId': inst_id}, upd)
+        uwsgi.unlock(self._model_lock_id[inst_id])
+        self._recomputation_active[inst_id] = False
 
     def on_get(self, req, resp, inst_id):
         """
@@ -187,7 +384,7 @@ class NILM(object):
         if (inst_id not in self._models.keys()):
             inst_doc = self._mdb.models.find_one({"meterId": inst_id})
             if inst_doc is None:
-                modelstr = dill.dumps(hart.Hart85eeris(installation_id=inst_id))
+                modelstr = dill.dumps(livehart.LiveHart(installation_id=inst_id))
                 inst_doc = {'meterId': inst_id,
                             'lastUpdate':
                             dt.datetime.now().strftime('%Y-%m-%dT%H:%M:%S%z'),
@@ -197,7 +394,13 @@ class NILM(object):
             self._models[inst_id] = dill.loads(inst_doc['modelHart'])
             self._model_lock_id[inst_id] = self._model_lock_num
             self._model_lock_num += 1
+            self._recomputation_active[inst_id] = False
             self._put_count[inst_id] = 0
+        # Inform caller if recomputation is active
+        if self._recomputation_active[inst_id]:
+            resp.status = falcon.HTTP_204
+            resp.body = "Model recomputation in progress, send data again later"
+            return
         uwsgi.lock(self._model_lock_id[inst_id])
         model = self._models[inst_id]
         logging.debug('WSGI lock (PUT)')
@@ -234,6 +437,20 @@ class NILM(object):
             del self._model_lock_id[inst_id]
         resp.status = falcon.HTTP_200
 
+    def perform_clustering(self):
+        """
+        Starts clustering thread for all loaded installations
+        """
+        for inst_id, model in self._models.items():
+            # This should never happen
+            if inst_id not in self._model_lock_id.keys():
+                self._model_lock_id[inst_id] = self._model_lock_num
+                self._model_lock_num += 1
+            uwsgi.lock(self._model_lock_id[inst_id])
+            model.force_clustering(start_thread=True)
+            uwsgi.unlock(self._model_lock_id[inst_id])
+            time.sleep(5)
+
     def on_post_clustering(self, req, resp, inst_id):
         """
         Starts a clustering thread on the target model
@@ -266,7 +483,7 @@ class NILM(object):
         model = self._load_model(inst_id)
         payload = []
         logging.debug('WSGI lock (activations)')
-        for a_k, a in model.appliances:
+        for a_k, a in model.appliances.items():
             for row in a.activations.itertuples():
                 # Energy consumption in kWh
                 consumption = (row.end - row.start).seconds / 3600.0 * \
@@ -282,4 +499,49 @@ class NILM(object):
         time.sleep(0.01)
         body = {"payload": payload}
         resp.body = json.dumps(body)
+        resp.status = falcon.HTTP_200
+
+    def on_post_recomputation(self, req, resp, inst_id):
+        """
+        Recompute an installation model based on all available data.
+
+        Request has the following format:
+        {
+            'start' : int, // Start timestamp, in seconds since UNIX epoch
+            'end' : int, // End timestamp, in seconds since UNIX epoch
+            'step' : int // Recomputation step, in seconds
+        }
+
+        The old model is discarded and a new model is recomputed based on data
+        available between start and end timestamps.
+        """
+        # Start recomputation thread
+        data = json.loads(req.stream)
+        start_ts = int(data['start'])
+        end_ts = int(data['end'])
+        step = int(data['step'])
+        name = "recomputation_%s" % (inst_id)
+        self._recomputation_thread = threading.Thread(
+            target=self._recompute_model, name=name,
+            args=(inst_id, start_ts, end_ts, step)
+        )
+        self._recomputation_thread.start()
+        now = datetime.datetime.now()
+        resp.body = "Recomputation thread submitted on %s " % (now)
+        resp.status = falcon.HTTP_200  # Default status
+
+    def on_post_start_thread(self, req, resp, inst_id):
+        """
+        Start periodic computation thread.
+        """
+        # TODO: Fixed period for now. Move this to the request, if needed.
+        self._periodic_thread(period=3600)
+        atexit.register(self._cancel_thread)
+        resp.status = falcon.HTTP_200
+
+    def on_post_stop_thread(self, req, resp, inst_id):
+        """
+        Cancels the periodic computation thread.
+        """
+        self._cancel_thread()
         resp.status = falcon.HTTP_200

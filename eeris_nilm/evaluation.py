@@ -20,7 +20,7 @@ import logging
 from sklearn import metrics
 from eeris_nilm import appliance
 from eeris_nilm.datasets import redd
-from eeris_nilm.algorithms import hart
+from eeris_nilm.algorithms import livehart
 from eeris_nilm import utils
 
 # TODO: Possibly also extract
@@ -156,7 +156,8 @@ def hart_redd_evaluation(redd_path, house='house_1',
                          mode='edges',
                          step=None):
     """
-    Evaluate performance of Hart's algorithm to the REDD dataset.
+    Evaluate performance of implementation of Hart's algorithm to the REDD
+    dataset.
 
     Parameters
     ----------
@@ -217,7 +218,7 @@ def hart_redd_evaluation(redd_path, house='house_1',
 # TODO: Evaluate using best matching instead of greedy matching
 def hart_evaluation(data, labels, mode='edges', step=None):
     """
-    Evaluate performance of Hart's algorithm to the REDD dataset.
+    Evaluate performance of Hart's algorithm implementation.
 
     Parameters
     ----------
@@ -266,13 +267,13 @@ def hart_evaluation(data, labels, mode='edges', step=None):
     """
     # Build the model
     if step is None:
-        model = hart.Hart85eeris(installation_id=1, batch_mode=True)
+        model = livehart.LiveHart(installation_id=1, batch_mode=True)
         y = data['mains']
         model.update(y)
     else:
         # Perhaps this should be batch as well, if step is larger than a few
         # hours.
-        model = hart.Hart85eeris(installation_id=1, batch_mode=False)
+        model = livehart.LiveHart(installation_id=1, batch_mode=False)
         for i in range(0, data['mains'].shape[0], step):
             if i % 3600 == 0:
                 logging.debug("Hour count: %d" % (i / 3600))
@@ -294,14 +295,14 @@ def hart_evaluation(data, labels, mode='edges', step=None):
             # Train a Hart model
             if step is None:
                 # Process everything at once
-                model_g = hart.Hart85eeris(installation_id=1, batch_mode=True)
+                model_g = livehart.LiveHart(installation_id=1, batch_mode=True)
                 y = data[i]
                 y.insert(1, 'reactive', 0.0)
                 y.insert(1, 'voltage', g.nominal_voltage)
                 model_g.update(y)
             else:
                 # Step-processing.
-                model_g = hart.Hart85eeris(installation_id=1, batch_mode=False)
+                model_g = livehart.LiveHart(installation_id=1, batch_mode=False)
                 for j in range(0, data[i].shape[0], step):
                     if j % 3600 == 0:
                         print('Appliance %s, hour count %d' % (name, j/3600))

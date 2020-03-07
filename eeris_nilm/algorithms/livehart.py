@@ -30,14 +30,23 @@ import bson
 # discrepancies from the actual background consumption (as measured through the
 # meter)
 
+# TODO: Breakdown into smaller modules (incl. subclassing and separation of
+# "live" and retrospective analysis)
 
-class Hart85eeris(object):
-    """ Modified implementation of Hart's NILM algorithm. """
+
+class LiveHart(object):
+    """
+    Improved implementation of Hart's NILM algorithm
+    supporting real-time feedback through a "live" monitoring mechanism.
+    """
     # TODO:
     # - remove the class variables that are not needed
     # - Some of the 'constant' variables should be model parameters
     # - all "live" data should be part of a different class to simplify things a
     # little
+
+    # ID for particular algorithm version
+    VERSION = "0.0"
 
     # Some of the variables below could be parameters
     BUFFER_SIZE_SECONDS = 24 * 3600
@@ -58,7 +67,7 @@ class Hart85eeris(object):
 
     # For clustering
     # TODO: Check the clustering values
-    CLUSTER_STEP_HOURS = 1  # Cluster update frequency, in hours
+    CLUSTER_STEP_HOURS = 0.1  # Cluster update frequency, in hours
     CLUSTER_DATA_DAYS = 30 * 3  # Use last 3 months for clustering
     MIN_EDGES_STATIC_CLUSTERING = 5  # DBSCAN parameter
     LARGE_POWER = 1e6  # Large power consumption
@@ -160,7 +169,7 @@ class Hart85eeris(object):
         self._min_active = 0.0
         self._max_active = 0.0
 
-        logging.debug("Hart object initialized.")
+        logging.debug("LiveHart object initialized.")
 
     @property
     def data(self):
@@ -365,9 +374,9 @@ class Hart85eeris(object):
         matches = matches[['active', 'reactive']].values
         # Apply DBSCAN.
         # TODO: Experiment on the options.
-        # TODO: Normalize matches in the 0-1 range, so that difference is
+        # NOTE: Normalize matches in the 0-1 range, so that difference is
         # percentage! This will perhaps allow better matches.
-        # TODO: Possibly start with high detail and then merge similar clusters?
+        # NOTE: Possibly start with high detail and then merge similar clusters?
         self._lock.release()
         debug_t_start = datetime.datetime.now()
         logging.debug('Initiating static clustering at %s' % debug_t_start)
@@ -543,7 +552,7 @@ class Hart85eeris(object):
         # Perform sanity checks and clean buffers.
         self._clean_buffers()
 
-    def _match_edges_hart_live(self):
+    def _match_edges_live(self):
         """
         Adaptation of Hart's edge matching algorithm to support the "live"
         display of eeRIS. Note that this works only in 'online' mode (small
@@ -755,7 +764,9 @@ class Hart85eeris(object):
         """
         Maintain an estimate of the background power consumption
         """
-        if self._background_last_update is not None:
+        if self._background_last_update is not None and \
+           self.data is not None and \
+           self.data.shape[0] > 0:
             td = (self.data.index[-1] - self._background_last_update)
             hours_since_update = td.total_seconds() / 3600.0
         else:
@@ -770,7 +781,9 @@ class Hart85eeris(object):
             # ignores missing values or errors in measurements that result in
             # zeros.
             v = steady_states[steady_states > 1.0]
-            if v.shape[0] > 0:
+            if v.shape[0] > 0 and \
+               self.data is not None and \
+               self.data.shape[0] > 0:
                 self.background_active = np.min(v)
                 self._background_last_update = self.data.index[-1]
             else:
@@ -854,7 +867,7 @@ class Hart85eeris(object):
         self._update_live()
 
         # TODO: Fix bugs in sanity checks
-        self._match_edges_hart_live()
+        self._match_edges_live()
         # Sanity checks - live
         self._sanity_checks_live()
 

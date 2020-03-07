@@ -14,19 +14,29 @@ See the License for the specific language governing permissions and
 limitations under the License.
 """
 
-# Demo of edge detection without REST service implementation
+# Demo of real-time "live" detection, as well as clustering and activation
+# history. This version tests the following endpoints at the server:
+#
+# POST /nilm/{installation_id}/clustering
+# GET /nilm/{installation_id}/activations
+# {PUT,GET, DELETE} /nilm/{installation_id}/
+# DELETE /installation/{installation_id}/model
+#
+# Before running this script, start MongoDB and run
+# start_app_wsgi.sh to start the services at localhost, after making sure that
+# 'threads=False' in wsgi.py.
+
 import sys
 import time
 import requests
 import threading
 import json
-import logging
+import atexit
 from eeris_nilm.datasets import eco
 
-logging.basicConfig(level=logging.DEBUG)
-
-# Start mongodb and uwsgi before running this demo.
-# uwsgi uwsgi_nilm.ini
+# Uncomment these two lines if you want to see detailed debug logs
+# import logging
+# logging.basicConfig(level=logging.DEBUG)
 
 
 # Function to initiate clustering at regular intervals
@@ -59,15 +69,26 @@ date_end = '2012-06-15T23:59'
 step = 5
 plot_step = 600
 nilm_url = 'http://localhost:8000/nilm/1'
-nnst_url = 'http://localhost:8000/installation/1/model'
-# nilm_url = 'http://83.212.104.172:9991/nilm/1'
-# nnst_url = 'http://83.212.104.172:9991/installation/1/model'
+inst_url = 'http://localhost:8000/installation/1/model'
 
 # Prepare data
 phase_list, power = eco.read_eco(p, date_start, date_end)
 
+# Delete model at database and the server memory (optional)
+delete = True
+if delete:
+    r = requests.delete(nilm_url)
+    if r.status_code != 200:
+        print("Could not delete model from server memory, exiting")
+        sys.exit(1)
+    r = requests.delete(inst_url)
+    if r.status_code != 200:
+        print("Could not delete model at database, exiting")
+        sys.exit(1)
+
 # Initiate clustering and activation threads
 stop_event = threading.Event()
+atexit.register(stop_event.set)
 cluster_requests_thread = threading.Thread(target=request_clustering,
                                            name='clustering',
                                            args=(nilm_url, stop_event))
@@ -93,7 +114,7 @@ for i in range(0, power.shape[0], step):
         print("Something went wrong, received HTTP %d" % (r.status_code))
     live = r.text
     print("GET response (live): %s" % (live))
-    time.sleep(0.1)
+    time.sleep(0.01)
 stop_event.set()
 cluster_requests_thread.join()
 activation_requests_thread.join()

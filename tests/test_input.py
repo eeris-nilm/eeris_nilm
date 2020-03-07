@@ -1,5 +1,5 @@
 """
-Copyright 2019 Christos Diou
+Copyright 2020 Christos Diou
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -15,11 +15,11 @@ limitations under the License.
 """
 
 import pandas as pd
-from eeris_nilm.algorithms import hart
+from eeris_nilm.algorithms import livehart
 
 # TODO:
-# 1. Add use-cases including missing values, measurement errors, duplicates, past values,
-# errors in sampling rate etc.
+# 1. Add use-cases including missing values, measurement errors, duplicates,
+# past values, errors in sampling rate etc.
 # 2. Convert to unit tests
 
 a = '{"active":{"1561543133623":170,"1561543132348":170,"1561543131124":170,"1561543129857":170},"reactive":{"1561543133623":-132.8185565061,"1561543132348":-132.8185565061,"1561543131124":-132.8185565061,"1561543129857":-132.8185565061},"voltage":{"1561543133623":236.5,"1561543132348":236.5,"1561543131124":236.5,"1561543129857":236.3}}'
@@ -35,7 +35,7 @@ a_df = pd.read_json(a)
 b_df = pd.read_json(b)
 c_df = pd.read_json(c)
 
-model = hart.Hart85eeris(1)
+model = livehart.LiveHart(1)
 model.update(a_df)
 model.update(b_df)
 model.update(c_df)
