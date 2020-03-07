@@ -409,6 +409,9 @@ class NILM(object):
             resp.status = falcon.HTTP_204
             resp.body = "Model recomputation in progress, send data again later"
             return
+        if inst_id not in self._model_lock_id.keys():
+            self._model_lock_id[inst_id] = self._model_lock_num
+            self._model_lock_num += 1
         uwsgi.lock(self._model_lock_id[inst_id])
         model = self._models[inst_id]
         logging.debug('WSGI lock (PUT)')
