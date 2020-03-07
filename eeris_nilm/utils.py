@@ -279,8 +279,12 @@ def get_data_from_cenote_response(resp):
     Convert response from cenote system to pandas.DataFrame that can be used by
     eeris_nilm.
     """
+    if resp.status_code != 200:
+        return None
     rd = json.loads(resp.text)
     data = pd.DataFrame(rd['results'])
+    if data.shape[0] == 0:
+        return None
     data = data.drop(['installationid', 'uuid', 'cenote$timestamp',
                       'cenote$id'], axis=1)
     data['cenote$created_at'] = pd.to_datetime(data['cenote$created_at'],

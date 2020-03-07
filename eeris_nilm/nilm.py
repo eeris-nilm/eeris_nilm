@@ -81,7 +81,7 @@ class NILM(object):
         self._activations_url = act_url  # Where to send device activations
         self._computations_url = comp_url  # Recomputation data URL
         if thread:
-            self._periodic_thread(period=60)
+            self._periodic_thread(period=3600)
             atexit.register(self._cancel_thread)
 
     def _send_activations(self):
@@ -319,7 +319,12 @@ class NILM(object):
         # Delete model from memory
         self._models.pop(inst_id, None)
         # Delete model from database
-        self._models.delete_one({'meterId': inst_id})
+        result = self._mdb.models.delete_many({'meterId': inst_id})
+        dcount = int(result.deleted_count)
+        if dcount == 0:
+            logging.debug("Installation did not exist in the database")
+        elif dcount > 1:
+            logging.debug("More than one documents deleted in database")
         # Prepare new model
         modelstr = dill.dumps(livehart.LiveHart(installation_id=inst_id))
         inst_doc = {'meterId': inst_id,
@@ -341,6 +346,8 @@ class NILM(object):
             }
             r = requests.get(url, params)
             data = utils.get_data_from_cenote_response(r)
+            if data is None:
+                continue
             model.update(data)
             self._put_count[inst_id] += 1
             if (self._put_count[inst_id] % self.STORE_PERIOD == 0):
@@ -529,9 +536,10 @@ class NILM(object):
            'step' not in req.params:
             resp.status = falcon.HTTP_400
             resp.body = "Incorrect query string in request"
-        start_ts = req.params['start']
-        end_ts = req.params['end']
-        step = req.params['step']
+            return
+        start_ts = int(req.params['start'])
+        end_ts = int(req.params['end'])
+        step = int(req.params['step'])
         name = "recomputation_%s" % (inst_id)
         self._recomputation_thread = threading.Thread(
             target=self._recompute_model, name=name,

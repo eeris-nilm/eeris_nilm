@@ -67,7 +67,7 @@ class LiveHart(object):
 
     # For clustering
     # TODO: Check the clustering values
-    CLUSTER_STEP_HOURS = 0.1  # Cluster update frequency, in hours
+    CLUSTER_STEP_HOURS = 1  # Cluster update frequency, in hours
     CLUSTER_DATA_DAYS = 30 * 3  # Use last 3 months for clustering
     MIN_EDGES_STATIC_CLUSTERING = 5  # DBSCAN parameter
     LARGE_POWER = 1e6  # Large power consumption
