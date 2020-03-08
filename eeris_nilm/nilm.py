@@ -340,9 +340,15 @@ class NILM(object):
         for ts in range(start_ts, end_ts, step):
             url = self._computations_url + inst_id
             # Endpoint expects timestamp in milliseconds since unix epoch
+            st = ts * 1000
+            if ts + step < end_ts:
+                et = ts + step
+            else:
+                et = end_ts * 1000
+
             params = {
-                "start": ts * 1000,
-                "end": (ts + step) * 1000
+                "start": st,
+                "end": et
             }
             r = requests.get(url, params)
             data = utils.get_data_from_cenote_response(r)
