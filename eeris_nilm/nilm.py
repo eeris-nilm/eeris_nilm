@@ -342,7 +342,7 @@ class NILM(object):
             # Endpoint expects timestamp in milliseconds since unix epoch
             st = ts * 1000
             if ts + step < end_ts:
-                et = ts + step
+                et = (ts + step) * 1000
             else:
                 et = end_ts * 1000
 

@@ -18,6 +18,7 @@ import numpy as np
 import pandas as pd
 import json
 
+
 def get_segments(signal, mask, only_true=True):
     """
     Get the segments of a signal indicated by consecutive "True" values in a
@@ -49,7 +50,7 @@ def get_segments(signal, mask, only_true=True):
     segments = []
     idx = np.where(np.concatenate(([True], mask[:-1] != mask[1:], [True])))[0]
     for i in range(len(idx[:-1])):
-        seg = signal[idx[i]:idx[i+1]]
+        seg = signal[idx[i]:idx[i + 1]]
         segments.append(seg)
 
     if only_true:
@@ -285,11 +286,11 @@ def get_data_from_cenote_response(resp):
     data = pd.DataFrame(rd['results'])
     if data.shape[0] == 0:
         return None
-    data = data.drop(['installationid', 'uuid', 'cenote$timestamp',
+    data = data.drop(['installationid', 'uuid', 'cenote$created_at',
                       'cenote$id'], axis=1)
-    data['cenote$created_at'] = pd.to_datetime(data['cenote$created_at'],
-                                               unit='ms', origin='unix')
-    data = data.rename(columns={'cenote$created_at': 'timestamp'})
+    data['cenote$timestamp'] = pd.to_datetime(data['cenote$timestamp'],
+                                              unit='ms', origin='unix')
+    data = data.rename(columns={'cenote$timestamp': 'timestamp'})
     data = data.set_index('timestamp')
     data.index.name = None
     return data
