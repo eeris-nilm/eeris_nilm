@@ -80,7 +80,7 @@ def create_app(dburl, dbname, act_url=None, recomp_url=None,
     api = falcon.API()
     # NILM
     orchestrator_url = 'http://localhost:8001/'
-    act_url = orchestrator_url + 'historical/'
+    act_url = orchestrator_url + 'historical/events/'
     comp_url = orchestrator_url + 'historical/'
     nilm = eeris_nilm.nilm.NILM(mdb, thread=thread, act_url=act_url,
                                 comp_url=comp_url)
