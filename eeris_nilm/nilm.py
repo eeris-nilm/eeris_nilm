@@ -583,14 +583,19 @@ class NILM(object):
             resp.status = falcon.HTTP_400
             resp.body = "Incorrect query string in request"
             return
-        applilance_id = req.params['appliance_id']
+        appliance_id = req.params['appliance_id']
         name = req.params['name']
         if inst_id not in self._model_lock_id.keys():
             self._model_lock_id[inst_id] = self._model_lock_num
             self._model_lock_num += 1
         uwsgi.lock(self._model_lock_id[inst_id])
         model = self._load_model(inst_id)
-        model.appliances['appliance_id'].name = name
+        prev_name = model.appliances[appliance_id].name
+        model.appliances[appliance_id].name = name
+        logging.debug("Installation: %s. Renamed appliance %s from %s to %s" %
+                      (inst_id, appliance_id, prev_name, name))
         # Make sure to store the model
         self._store_model(inst_id)
+        uwsgi.unlock(self._model_lock_id[inst_id])
+        time.sleep(0.01)
         resp.status = falcon.HTTP_200
