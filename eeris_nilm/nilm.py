@@ -288,7 +288,23 @@ class NILM(object):
                 self._recomputation_active[inst_id] = False
         return self._models[inst_id]
 
-    def _recompute_model(self, inst_id, start_ts, end_ts, step=6*3600):
+    def _store_model(self, inst_id):
+        """
+        Helper function to store a model in the database.  WARNING: This function
+        assumes that the model is already loaded. Also, is NOT thread safe,
+        never call it directly unless you know what you're doing.
+        """
+        model = self._models[inst_id]
+        modelstr = dill.dumps(model)
+        upd = {'$set': {
+            'meterId': inst_id,
+            'lastUpdate': str(dt.datetime.now()),
+            'debugInstallation': True,
+            'modelHart': modelstr}
+        }
+        self._mdb.models.update_one({'meterId': inst_id}, upd)
+
+    def _recompute_model(self, inst_id, start_ts, end_ts, step=6 * 3600):
         """
         Recompute a model from data provided by a service. Variations of this
         routine can be created for different data sources.
@@ -307,6 +323,7 @@ class NILM(object):
         step : int
         Step, in seconds to use for calculations
         """
+        # TODO: Take into account naming events in the model
         if self._computations_url is None:
             logging.debug(("No URL has been provided for past data.",
                            "Model re-computation is not supported."))
@@ -358,14 +375,7 @@ class NILM(object):
             self._put_count[inst_id] += 1
             if (self._put_count[inst_id] % self.STORE_PERIOD == 0):
                 # Persistent storage
-                modelstr = dill.dumps(model)
-                upd = {'$set': {
-                    'meterId': inst_id,
-                    'lastUpdate': str(dt.datetime.now()),
-                    'debugInstallation': True,
-                    'modelHart': modelstr}
-                }
-                self._mdb.models.update_one({'meterId': inst_id}, upd)
+                self._store_model(inst_id)
         uwsgi.unlock(self._model_lock_id[inst_id])
         self._recomputation_active[inst_id] = False
 
@@ -437,15 +447,7 @@ class NILM(object):
         self._put_count[inst_id] += 1
         if (self._put_count[inst_id] % self.STORE_PERIOD == 0):
             # Persistent storage
-            modelstr = dill.dumps(model)
-            self._mdb.models.update_one({'meterId': inst_id},
-                                        {'$set':
-                                         {'meterId': inst_id,
-                                          'lastUpdate': str(dt.datetime.now()),
-                                          'debugInstallation': True,
-                                          'modelHart': modelstr
-                                          }
-                                         })
+            self._store_model(inst_id)
         # resp.body = 'OK'
         # lret = data.shape[0]
         resp.body = self._prepare_response_body(model)
@@ -570,4 +572,25 @@ class NILM(object):
         Cancels the periodic computation thread.
         """
         self._cancel_thread()
+        resp.status = falcon.HTTP_200
+
+    def on_post_appliance_name(self, req, resp, inst_id):
+        """
+        Sets a new name for an appliance and store the model that has been
+        created.
+        """
+        if 'appliance_id' not in req.params or 'name' not in req.params:
+            resp.status = falcon.HTTP_400
+            resp.body = "Incorrect query string in request"
+            return
+        applilance_id = req.params['appliance_id']
+        name = req.params['name']
+        if inst_id not in self._model_lock_id.keys():
+            self._model_lock_id[inst_id] = self._model_lock_num
+            self._model_lock_num += 1
+        uwsgi.lock(self._model_lock_id[inst_id])
+        model = self._load_model(inst_id)
+        model.appliances['appliance_id'].name = name
+        # Make sure to store the model
+        self._store_model(inst_id)
         resp.status = falcon.HTTP_200

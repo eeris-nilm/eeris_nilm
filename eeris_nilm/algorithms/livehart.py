@@ -182,7 +182,7 @@ class LiveHart(object):
         """
         if data.shape[0] == 0:
             raise ValueError('Empty dataframe')
-        # Check time difference
+        # Check time difference.
         duration = (data.index[-1] - data.index[0]).days
         if duration > self.MAX_WINDOW_DAYS:
             # Do not process the window, it's too long.
@@ -511,7 +511,7 @@ class LiveHart(object):
         # Distance of edges
         for dst in range(1, len_e):
             # Check each edge
-            for i in range(len_e-1):
+            for i in range(len_e - 1):
                 # Only check positive and unmarked
                 if e.iloc[i]['active'] < 0 or e.iloc[i]['mark']:
                     continue
@@ -742,7 +742,7 @@ class LiveHart(object):
             total_estimated += a.signature[0]
         total_estimated += self.background_active
         # Allow for 10% error in edge estimation
-        if self.running_avg_power[0] < 0.9*total_estimated[0]:
+        if self.running_avg_power[0] < 0.9 * total_estimated[0]:
             # We may have made a matching error, and an appliance should have
             # been switched off. Heuristic solution here.
             # self.live = []
@@ -882,7 +882,7 @@ class LiveHart(object):
             td = self.last_processed_ts - self._start_ts
         self._lock.release()
 
-        if td.total_seconds()/3600.0 >= self.CLUSTER_STEP_HOURS:
+        if td.total_seconds() / 3600.0 >= self.CLUSTER_STEP_HOURS:
             self.force_clustering()
             # In case we don't want threads (for debugging)
             # self._static_cluster()

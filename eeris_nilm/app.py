@@ -91,7 +91,8 @@ def create_app(dburl, dbname, act_url=None, recomp_url=None,
     api.add_route('/nilm/{inst_id}/recomputation', nilm, suffix='recomputation')
     api.add_route('/nilm/{inst_id}/start_thread', nilm, suffix='start_thread')
     api.add_route('/nilm/{inst_id}/stop_thread', nilm, suffix='stop_thread')
-    # api.add_route('/nilm/{inst_id}/newdevice', nilm, suffix='newdevice')
+    api.add_route('/nilm/{inst_id}/appliance_name',
+                  nilm, suffix='appliance_name')
     # Installation
     api.add_route('/installation/{inst_id}/model',
                   eeris_nilm.installation.InstallationManager(mdb),
