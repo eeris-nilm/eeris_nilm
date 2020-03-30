@@ -577,9 +577,12 @@ class NILM(object):
     def on_post_appliance_name(self, req, resp, inst_id):
         """
         Sets a new name for an appliance and store the model that has been
-        created.
+        created. Expects parameters appliance_id, name and category, all
+        strings.
         """
-        if 'appliance_id' not in req.params or 'name' not in req.params:
+        if 'appliance_id' not in req.params or \
+           'name' not in req.params or \
+           'category' not in req.params:
             resp.status = falcon.HTTP_400
             resp.body = "Incorrect query string in request"
             return
