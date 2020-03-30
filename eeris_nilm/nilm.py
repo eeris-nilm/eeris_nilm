@@ -594,6 +594,11 @@ class NILM(object):
             self._model_lock_num += 1
         uwsgi.lock(self._model_lock_id[inst_id])
         model = self._load_model(inst_id)
+        if appliance_id not in model.appliances:
+            logging.debug("Appliance id %s not found in model")
+            resp.status = falcon.HTTP_400
+            resp.body = ("Appliance id %s not found" % (appliance_id))
+            return
         prev_name = model.appliances[appliance_id].name
         prev_category = model.appliances[appliance_id].category
         model.appliances[appliance_id].name = name
