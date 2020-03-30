@@ -582,13 +582,13 @@ class NILM(object):
         """
         if 'appliance_id' not in req.params or \
            'name' not in req.params or \
-           'category' not in req.params:
+           'type' not in req.params:
             resp.status = falcon.HTTP_400
-            # resp.body = "Incorrect query string in request"
+            resp.body = "Incorrect query string in request"
             return
         appliance_id = req.params['appliance_id']
         name = req.params['name']
-        category = req.params['category']
+        category = req.params['type']
         if inst_id not in self._model_lock_id.keys():
             self._model_lock_id[inst_id] = self._model_lock_num
             self._model_lock_num += 1
@@ -596,8 +596,10 @@ class NILM(object):
         model = self._load_model(inst_id)
         if appliance_id not in model.appliances:
             logging.debug("Appliance id %s not found in model")
+            uwsgi.unlock(self._model_lock_id[inst_id])
+            time.sleep(0.01)
             resp.status = falcon.HTTP_400
-            # resp.body = ("Appliance id %s not found" % (appliance_id))
+            resp.body = ("Appliance id %s not found" % (appliance_id))
             return
         prev_name = model.appliances[appliance_id].name
         prev_category = model.appliances[appliance_id].category
