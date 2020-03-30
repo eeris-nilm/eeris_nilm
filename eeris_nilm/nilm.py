@@ -584,7 +584,7 @@ class NILM(object):
            'name' not in req.params or \
            'category' not in req.params:
             resp.status = falcon.HTTP_400
-            resp.body = "Incorrect query string in request"
+            # resp.body = "Incorrect query string in request"
             return
         appliance_id = req.params['appliance_id']
         name = req.params['name']
@@ -597,7 +597,7 @@ class NILM(object):
         if appliance_id not in model.appliances:
             logging.debug("Appliance id %s not found in model")
             resp.status = falcon.HTTP_400
-            resp.body = ("Appliance id %s not found" % (appliance_id))
+            # resp.body = ("Appliance id %s not found" % (appliance_id))
             return
         prev_name = model.appliances[appliance_id].name
         prev_category = model.appliances[appliance_id].category
