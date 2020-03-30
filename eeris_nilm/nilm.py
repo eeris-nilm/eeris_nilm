@@ -585,15 +585,19 @@ class NILM(object):
             return
         appliance_id = req.params['appliance_id']
         name = req.params['name']
+        category = req.params['category']
         if inst_id not in self._model_lock_id.keys():
             self._model_lock_id[inst_id] = self._model_lock_num
             self._model_lock_num += 1
         uwsgi.lock(self._model_lock_id[inst_id])
         model = self._load_model(inst_id)
         prev_name = model.appliances[appliance_id].name
+        prev_category = model.appliances[appliance_id].category
         model.appliances[appliance_id].name = name
-        logging.debug("Installation: %s. Renamed appliance %s from %s to %s" %
-                      (inst_id, appliance_id, prev_name, name))
+        model.appliances[appliance_id].category = category
+        logging.debug(("Installation: %s. Renamed appliance %s from %s with"
+                       "category %s to %s with category %s") %
+                      (inst_id, appliance_id, prev_name, prev_category, name, category))
         # Make sure to store the model
         self._store_model(inst_id)
         uwsgi.unlock(self._model_lock_id[inst_id])
