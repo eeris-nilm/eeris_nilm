@@ -304,7 +304,8 @@ class NILM(object):
         }
         self._mdb.models.update_one({'meterId': inst_id}, upd)
 
-    def _recompute_model(self, inst_id, start_ts, end_ts, step=6 * 3600):
+    def _recompute_model(self, inst_id, start_ts, end_ts, step=6 * 3600,
+                         warmup_period=12*3600):
         """
         Recompute a model from data provided by a service. Variations of this
         routine can be created for different data sources.
@@ -322,7 +323,35 @@ class NILM(object):
 
         step : int
         Step, in seconds to use for calculations
+
+        warmup_period : int
+        How many seconds to operate in non-batch mode with 3-second data frames,
+        in order to prepare for the appropriate live operation.
         """
+        def _recompute_loop(rstep):
+            """ Inner loop used in recomputation below """
+            for ts in range(start_ts, end_ts-warmup_period, rstep):
+                # Endpoint expects timestamp in milliseconds since unix epoch
+                st = ts * 1000
+                if ts + rstep < end_ts:
+                    et = (ts + rstep) * 1000
+                else:
+                    et = end_ts * 1000
+
+                params = {
+                    "start": st,
+                    "end": et
+                }
+                r = requests.get(url, params)
+                data = utils.get_data_from_cenote_response(r)
+                if data is None:
+                    continue
+                model.update(data)
+                self._put_count[inst_id] += 1
+                if (self._put_count[inst_id] % self.STORE_PERIOD == 0):
+                    # Persistent storage
+                    self._store_model(inst_id)
+
         # TODO: Take into account naming events in the model
         if self._computations_url is None:
             logging.debug(("No URL has been provided for past data.",
@@ -353,29 +382,11 @@ class NILM(object):
         self._models[inst_id] = dill.loads(inst_doc['modelHart'])
         self._put_count[inst_id] = 0
         model = self._models[inst_id]
-        # Recomputation loop
-        for ts in range(start_ts, end_ts, step):
-            url = self._computations_url + inst_id
-            # Endpoint expects timestamp in milliseconds since unix epoch
-            st = ts * 1000
-            if ts + step < end_ts:
-                et = (ts + step) * 1000
-            else:
-                et = end_ts * 1000
-
-            params = {
-                "start": st,
-                "end": et
-            }
-            r = requests.get(url, params)
-            data = utils.get_data_from_cenote_response(r)
-            if data is None:
-                continue
-            model.update(data)
-            self._put_count[inst_id] += 1
-            if (self._put_count[inst_id] % self.STORE_PERIOD == 0):
-                # Persistent storage
-                self._store_model(inst_id)
+        url = self._computations_url + inst_id
+        # Main recomputation loop.
+        _recompute_loop(step=step)
+        # Warmup loop (3-seconds step)
+        _recompute_loop(step=3)
         uwsgi.unlock(self._model_lock_id[inst_id])
         self._recomputation_active[inst_id] = False
 
