@@ -290,9 +290,10 @@ class NILM(object):
 
     def _store_model(self, inst_id):
         """
-        Helper function to store a model in the database.  WARNING: This function
-        assumes that the model is already loaded. Also, is NOT thread safe,
-        never call it directly unless you know what you're doing.
+        Helper function to store a model in the database.
+        WARNING: This function assumes that the model is already loaded. Also,
+        is NOT thread safe, never call it directly unless you know what you're
+        doing.
         """
         model = self._models[inst_id]
         modelstr = dill.dumps(model)
@@ -384,9 +385,9 @@ class NILM(object):
         model = self._models[inst_id]
         url = self._computations_url + inst_id
         # Main recomputation loop.
-        _recompute_loop(step=step)
+        _recompute_loop(step)
         # Warmup loop (3-seconds step)
-        _recompute_loop(step=3)
+        _recompute_loop(3)
         uwsgi.unlock(self._model_lock_id[inst_id])
         self._recomputation_active[inst_id] = False
 
