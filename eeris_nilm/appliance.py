@@ -255,9 +255,9 @@ def _activations_overlap_pct(a1, a2, tol=5):
             if start2 - start1 < - tol:
                 idx2 += 1
                 continue
-
-            if abs(start2 - start1) < tol:
-                if abs(end2 - end1) < tol:
+            # Built-in abs() leads to overflow warning
+            if np.fabs(start2 - start1) < tol:
+                if np.fabs(end2 - end1) < tol:
                     # match
                     matched += 1
                 idx2 += 1
