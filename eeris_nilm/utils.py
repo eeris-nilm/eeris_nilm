@@ -46,7 +46,7 @@ def get_segments(signal, mask, only_true=True):
     if signal.shape[0] != mask.shape[0]:
         raise ValueError("Signal and mask shape do not match")
 
-    # Vectorized way to identify semgments
+    # Vectorized way to identify semgments. Not straightforward, but fast.
     segments = []
     idx = np.where(np.concatenate(([True], mask[:-1] != mask[1:], [True])))[0]
     for i in range(len(idx[:-1])):

@@ -33,8 +33,10 @@ class Demo(object):
 
     def __init__(self, path, date_start, date_end, ax, axt,
                  model_path_r=None, model_path_w=None):
-        # Load data
         self.step = 3
+        # self.step = 3600
+
+        # Load data
         self.data, self.labels = redd.read_redd(path, date_start, date_end,
                                                 get_channels=False)
         self.power = self.data['mains']
@@ -113,7 +115,7 @@ class Demo(object):
                                  self.model._ymatch.tolist()[-lim:])
         # Update axis limits
         xmin, xmax = self.ax.get_xlim()
-        xmin = max(0, t - self.time_window)
+        xmin = max(0, t + self.step - self.time_window)
         xmax = max(self.time_window, t + self.step)
         ymin = min(self.ydata[-self.time_window:] + [0])  # List concatenation
         ymax = max(self.ydata[-self.time_window:] + [0])  # List concatenation
@@ -153,7 +155,7 @@ class Demo(object):
             self.line_match
 
 
-# logging.basicConfig(level=logging.DEBUG)
+logging.basicConfig(level=logging.DEBUG)
 
 # Setup
 p = 'tests/data/house_1'
@@ -165,6 +167,7 @@ date_end = '2011-04-30T23:59'
 fig = plt.figure(figsize=(19.2, 10.8), dpi=100)
 ax = plt.subplot(2, 1, 1)
 axt = plt.subplot(2, 1, 2)
+# plt.ion()
 model_path_r = 'tests/data/model_redd.dill'
 model_path_w = 'tests/data/model_redd.dill'
 d = Demo(p, date_start, date_end, ax, axt, model_path_r=model_path_r,

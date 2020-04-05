@@ -54,7 +54,7 @@ class LiveHart(object):
     # Limiters/thresholds
     MAX_WINDOW_DAYS = 100
     MAX_NUM_STATES = 1000
-    MAX_DISPLAY_SECONDS = 10 * 3600
+    MAX_DISPLAY_SECONDS = 1 * 3600
     STEADY_THRESHOLD = 15
     SIGNIFICANT_EDGE = 50
     STEADY_SAMPLES_NUM = 5
@@ -67,6 +67,7 @@ class LiveHart(object):
 
     # For clustering
     # TODO: Check the clustering values
+    CLUSTERING_METHOD = "mean_shift"  # "dbscan" or "mean_shift"
     CLUSTER_STEP_HOURS = 1  # Cluster update frequency, in hours
     CLUSTER_DATA_DAYS = 30 * 3  # Use last 3 months for clustering
     MIN_EDGES_STATIC_CLUSTERING = 5  # DBSCAN parameter
@@ -208,7 +209,8 @@ class LiveHart(object):
             # Data concerning past dates update the buffer
             self._buffer = self._buffer.append(
                 utils.get_normalized_data(self._data_orig,
-                                          nominal_voltage=self.nominal_voltage))
+                                          nominal_voltage=self.nominal_voltage),
+                sort=True)
         # Data pre-processing (remove duplicates, resample to 1s)
         self._buffer = utils.preprocess_data(self._buffer)
         # Keep only the last BUFFER_SIZE_SECONDS of the buffer, if batch mode is
@@ -343,19 +345,27 @@ class LiveHart(object):
         # Update last processed
         self.last_processed_ts = self._buffer.index[-1]
 
-    def _static_cluster(self):
+    def _static_cluster(self, method="dbscan"):
         """
         Clustering step of Hart's method. Here it is implemented as a static
         clustering step that runs periodically, mapping previous devices to the
-        new device names.
-
-        In this implementation we use "static" clustering (apply clustering
-        periodically) instead of a dynamic cluster update. We also apply DBSCAN
-        algorithm, to avoid the normality assumptions made by Hart's original
-        algorithm.
+        new device names. In this implementation we use "static" clustering
+        (apply clustering periodically) instead of a dynamic cluster update.
 
         This function is designed to run as a thread.
+
+        Parameters
+        ----------
+
+        method : string with possible values "dbscan" or "mean_shift"
         """
+        # TODO: Experiment on the clustering parameters.
+        # NOTE: Normalize matches in the 0-1 range, so that difference is
+        # percentage! This will perhaps allow better matches.
+        # NOTE: Possibly start with high detail and then merge similar
+        # clusters?
+        # NOTE: Explore use of reactive power for matching and clustering
+
         # Do not wait forever
         if not self._lock.acquire(timeout=120):
             logging.debug("Static clustering Lock acquire timeout! - 1")
@@ -372,23 +382,34 @@ class LiveHart(object):
             matches = matches.loc[matches['start'] > start_ts]
         matches1 = matches.copy()
         matches = matches[['active', 'reactive']].values
-        # Apply DBSCAN.
-        # TODO: Experiment on the options.
-        # NOTE: Normalize matches in the 0-1 range, so that difference is
-        # percentage! This will perhaps allow better matches.
-        # NOTE: Possibly start with high detail and then merge similar clusters?
         self._lock.release()
         debug_t_start = datetime.datetime.now()
         logging.debug('Initiating static clustering at %s' % debug_t_start)
-        d = sklearn.cluster.DBSCAN(eps=self.MATCH_THRESHOLD, min_samples=3,
-                                   metric='euclidean', metric_params=None,
-                                   algorithm='auto', leaf_size=30)
-        d.fit(matches)
-        # DBSCAN only: How many clusters are there? Can we derive "centers"?
-        u_labels = np.unique(d.labels_[d.labels_ >= 0])
-        centers = np.zeros((u_labels.shape[0], matches.shape[1]))
-        for l in u_labels:
-            centers[l] = np.mean(matches[d.labels_ == l, :], axis=0)
+        if method == "dbscan":
+            # Apply DBSCAN.
+            d = sklearn.cluster.DBSCAN(eps=self.MATCH_THRESHOLD, min_samples=3,
+                                       metric='euclidean', metric_params=None,
+                                       algorithm='auto', leaf_size=30)
+            d.fit(matches)
+            # DBSCAN only: How many clusters are there? Can we derive "centers"?
+            labels = d.labels_
+            u_labels = np.unique(d.labels_[d.labels_ >= 0])
+            centers = np.zeros((u_labels.shape[0], matches.shape[1]))
+            for l in u_labels:
+                centers[l] = np.mean(matches[d.labels_ == l, :], axis=0)
+        elif method == "mean_shift":
+            # NOTE: Normalize matches in the 0-1 range, so that difference is
+            # percentage! This will perhaps allow better matching behavior.
+            # Degrade the matching resolution a bit.
+            bandwidth = 2 * self.MATCH_THRESHOLD
+            centers, labels = sklearn.cluster.mean_shift(matches,
+                                                         bandwidth=bandwidth,
+                                                         cluster_all=False)
+            u_labels = np.unique(labels[labels >= 0])
+        else:
+            raise ValueError(("Unrecognized clustering method %s. Possible "
+                              "values are \"dbscan\" and \"mean-shift\"") %
+                             method)
 
         # We need to make sure that devices that were already detected
         # previously keep the same name.
@@ -404,7 +425,7 @@ class LiveHart(object):
             appliance_id = str(bson.objectid.ObjectId())
             a = appliance.Appliance(appliance_id, name, category,
                                     signature=signature)
-            ml = matches1.iloc[d.labels_ == l, :]
+            ml = matches1.iloc[labels == l, :]
             # Remove overlapping matches. This is NOT included in Hart's
             # original algorithm, but seems to help.
             ml = utils.remove_overlapping_matches(ml)
@@ -424,15 +445,20 @@ class LiveHart(object):
             self.appliances = appliances
         else:
             # Map to previous
-            self.appliances = \
-                appliance.Appliance.match_appliances(appliances,
-                                                     self.appliances,
-                                                     copy_activations=True)
+            self.appliances = appliance.match_appliances(appliances,
+                                                         self.appliances,
+                                                         copy_activations=True)
         # Sync live appliances
         self.appliances_live = \
-            appliance.Appliance.match_appliances(self.appliances_live,
-                                                 self.appliances,
-                                                 copy_activations=True)
+            appliance.match_appliances(self.appliances_live,
+                                       self.appliances,
+                                       t=2.0 * self.MATCH_THRESHOLD,
+                                       copy_activations=True)
+        # Alternative option, match only power
+        # appliance.match_appliances(self.appliances_live, self.appliances,
+        #                            only_power=True,
+        #                            copy_activations=False)
+
         # Set timestamp
         self._last_clustering_ts = self._buffer.index[-1]
 
@@ -519,23 +545,23 @@ class LiveHart(object):
                 # No more edges to check
                 if j >= len_e:
                     break
-                # Edge has been marked before or is positive
+                # Next edge has been marked before or is positive
                 if e.iloc[j]['active'] >= 0 or e.iloc[j]['mark']:
                     continue
                 # Do not match edges very far apart in time
                 if (e.iloc[j]['start'] - e.iloc[i]['end']).days > \
                    self.MAX_MATCH_THRESHOLD_DAYS:
                     continue
-                # Do they match? (use negative of edge, since it is the negative
-                # part)
+                # Do they match? (use negative of edge for e2, since it is the
+                # negative part)
                 e1 = e.iloc[i][['active', 'reactive']].values.astype(np.float64)
                 e2 = \
                     -e.iloc[j][['active', 'reactive']].values.astype(np.float64)
                 match, d = utils.match_power(e1, e2, active_only=True,
                                              t=self.MATCH_THRESHOLD)
                 if match:
-                    # Match
-                    edge = (np.fabs(e1) + np.fabs(e2)) / 2.0
+                    # Match (e2 = -e.iloc[j], so it has the "correct" sign)
+                    edge = (e1 + e2) / 2.0
                     # TODO: We keep only 'start' time for each edge. Is this OK?
                     # Should we use 'end' time of e.iloc[j]?
                     df = pd.DataFrame({'start': e.iloc[i]['start'],
@@ -543,7 +569,7 @@ class LiveHart(object):
                                        'active': edge[0],
                                        'reactive': edge[1]}, index=[0])
                     self._matches = self._matches.append(df, ignore_index=True,
-                                                         sort=True)
+                                                         sort=False)
                     # Mark the edge as matched
                     c = e.columns.get_loc('mark')  # Crazy pandas indexing...
                     e.iat[i, c] = True
@@ -587,6 +613,7 @@ class LiveHart(object):
             category = 'unknown'
             a = appliance.Appliance(appliance_id, name, category,
                                     signature=e.reshape(-1, 1).T)
+            a.start_ts = self.last_processed_ts  # For activations
             # Does this look like a known appliance that isn't already matched?
             candidates = self._match_appliances_live(a)
             if not candidates:
@@ -608,6 +635,11 @@ class LiveHart(object):
             match, d = utils.match_power(e0, -e, active_only=True,
                                          t=self.MATCH_THRESHOLD)
             if match:
+                # Store live activations as well.
+                start_ts = self.live[i].start_ts
+                end_ts = self.last_processed_ts
+                active = self.live[i].signature[0][0]
+                self.live[i].append_activation(start_ts, end_ts, active)
                 self.live.pop(i)
                 matched = True
                 break
@@ -671,13 +703,13 @@ class LiveHart(object):
         Helper function to update the "explained" power consumption _ymatch
         based on a pair of matched edges. For debugging/demonstration purposes.
         """
-        end_sec_inv = (self.last_processed_ts - end).seconds
-        if end_sec_inv > self.MAX_DISPLAY_SECONDS:
+        end_sec_vis = (self.last_processed_ts - end).seconds
+        if end_sec_vis > self.MAX_DISPLAY_SECONDS:
             return
-        start_sec_inv = (self.last_processed_ts - start).seconds
-        if start_sec_inv > self.MAX_DISPLAY_SECONDS:
-            start_sec_inv = self.MAX_DISPLAY_SECONDS
-        self._ymatch[-start_sec_inv:-end_sec_inv] += active
+        start_sec_vis = (self.last_processed_ts - start).seconds
+        if start_sec_vis > self.MAX_DISPLAY_SECONDS:
+            start_sec_vis = self.MAX_DISPLAY_SECONDS
+        self._ymatch[-start_sec_vis:-end_sec_vis] += active
 
     def _update_live(self):
         """
@@ -706,13 +738,15 @@ class LiveHart(object):
             # prev = self._est_prev
         if self._yest.shape[0] > self.MAX_DISPLAY_SECONDS:
             self._yest = self._yest[-self.MAX_DISPLAY_SECONDS:]
-        # Update ymatch
+        # Update ymatch.
+        cutoff_ts = self.last_processed_ts - \
+            pd.offsets.Second(self.MAX_DISPLAY_SECONDS)
+        # To avoid unnecessary checks in _match_helper()
+        matches = self._matches[self._matches['end'] > cutoff_ts]
         self._ymatch = np.zeros_like(self._yest)
         [self._match_helper(x, y, z)
          for x, y, z in
-         zip(self._matches['start'],
-             self._matches['end'],
-             self._matches['active'])]
+         zip(matches['start'], matches['end'], matches['active'])]
 
     def _sanity_checks(self):
         # TODO: Need to activate only in case of edges. Checks need to go back
@@ -803,7 +837,7 @@ class LiveHart(object):
         """
         pass
 
-    def force_clustering(self, start_thread=False):
+    def force_clustering(self, start_thread=False, method="dbscan"):
         """
         This function forces recomputation of appliance models using the
         detected and matched edges (after clustering) and returns the activation
@@ -815,6 +849,8 @@ class LiveHart(object):
 
         start_thread : bool
         Threaded version, where a separate clustering thread is started
+        method : string
+        Method to use for clustering. Can be one of "dbscan" or "mean_shift"
 
         Returns
         -------
@@ -826,14 +862,15 @@ class LiveHart(object):
         # We acquire lock here as well since this function is public and may be
         # called arbitrarily
         if not start_thread:
-            self._static_cluster()
+            self._static_cluster(method=method)
             return
         # With threads
         if (self._clustering_thread is None) or \
            (not self._clustering_thread.is_alive()):
             self._clustering_thread = \
                 threading.Thread(target=self._static_cluster,
-                                 name='clustering_thread')
+                                 name='clustering_thread',
+                                 kwargs={'method': method})
             self._clustering_thread.start()
             # To ensure that the lock can be acquired by the thread
             time.sleep(0.01)
@@ -883,7 +920,7 @@ class LiveHart(object):
         self._lock.release()
 
         if td.total_seconds() / 3600.0 >= self.CLUSTER_STEP_HOURS:
-            self.force_clustering()
+            self.force_clustering(method=self.CLUSTERING_METHOD)
             # In case we don't want threads (for debugging)
             # self._static_cluster()
         time.sleep(0.01)

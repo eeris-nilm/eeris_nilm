@@ -605,9 +605,10 @@ class NILM(object):
         prev_category = model.appliances[appliance_id].category
         model.appliances[appliance_id].name = name
         model.appliances[appliance_id].category = category
-        logging.debug(("Installation: %s. Renamed appliance %s from %s with"
+        logging.debug(("Installation: %s. Renamed appliance %s from %s with "
                        "category %s to %s with category %s") %
-                      (inst_id, appliance_id, prev_name, prev_category, name, category))
+                      (inst_id, appliance_id, prev_name,
+                       prev_category, name, category))
         # Make sure to store the model
         self._store_model(inst_id)
         uwsgi.unlock(self._model_lock_id[inst_id])
