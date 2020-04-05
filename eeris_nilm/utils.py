@@ -133,18 +133,23 @@ def match_power(p1, p2, active_only=True, t=35.0, lp=1000, m=0.05):
     ----------
 
     p1, p2 : 1x2 Numpy arrays (active and reactive power).
+
     active_only : Boolean indicating if match should take into account only
     active power or both active and reactive power
+
     t : Float used to determine whether there is a match or no. If the
     difference is over t, then there is no match
+
     lp : Large power threshold. If the maximum active power of p1 and p2 is over
     this value, then a percentage is used for matching, instead of t.
+
     m : The matching percentage used for large active power values.
 
     Returns
     -------
 
     match : Boolean for match (True) or no match (False)
+
     distance : Distance between power consumptions. It is L1 distance in the
     case of active_only=True or L2 distance in case active_only=False.
 
