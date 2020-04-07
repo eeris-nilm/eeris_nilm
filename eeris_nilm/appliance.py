@@ -207,7 +207,7 @@ def match_appliances_power(a_from, a_to, t=35.0, copy_activations=True):
     return a
 
 
-def _activations_overlap_pct(a1, a2, tol=5):
+def _activations_overlap_pct(a1, a2, tol=5, n_limit=100):
     """
     Given two appliances with their activations, identify the percentage of
     matched activations. For a pair of activations to match, they need to
@@ -223,6 +223,11 @@ def _activations_overlap_pct(a1, a2, tol=5):
 
     tol: Tolerance, in seconds for matching of start and end times.
 
+    n_limit : int
+    Consider the last n_limit activatations of each appliance for the matching
+    (to speed things up). If None, then all values are considered
+
+
     Returns
     -------
 
@@ -235,9 +240,12 @@ def _activations_overlap_pct(a1, a2, tol=5):
     """
     # Make sure activations are sorted by their start time (in POSIX ts)
     df1 = a1.activations.sort_values(by=['start'])
-    v1 = df1[['start', 'end']].values.astype('datetime64[s]').astype('int')
+    v1 = df1[['start', 'end']].values.astype('datetime64[s]').astype('int64')
     df2 = a2.activations.sort_values(by=['start'])
-    v2 = df2[['start', 'end']].values.astype('datetime64[s]').astype('int')
+    v2 = df2[['start', 'end']].values.astype('datetime64[s]').astype('int64')
+    if n_limit is not None:
+        v1 = v1[-n_limit:, :]
+        v2 = v2[-n_limit:, :]
     # Perform the matching.
     # TODO: Alternative implementation (to be considered, if needed): Create
     # two masks, subtract them and identify segments that are larger than
@@ -252,12 +260,11 @@ def _activations_overlap_pct(a1, a2, tol=5):
             start2 = v2[idx2, 0]
             end2 = v2[idx2, 1]
 
-            if start2 - start1 < - tol:
+            if start2 - start1 < -tol:
                 idx2 += 1
                 continue
-            # Built-in abs() leads to overflow warning
-            if np.fabs(start2 - start1) < tol:
-                if np.fabs(end2 - end1) < tol:
+            if abs(start2 - start1) < tol:
+                if abs(end2 - end1) < tol:
                     # match
                     matched += 1
                 idx2 += 1
@@ -277,19 +284,18 @@ def _activations_overlap_pct(a1, a2, tol=5):
     return (pct1, pct2)
 
 
-def match_appliances(a_from, a_to, t=100.0, tol=5,
-                     copy_activations=True,
-                     only_power=False):
+def match_appliances(a_new, a_old, t=100.0, tol=5, copy_activations=True,
+                     only_power=False, keep_old=False):
     """
     Helper function to match between two dictionaries of appliances, using
     both their power consumption and their activation timing.
 
     Parameters
     ----------
-    a_from : Dictionary of eeris_nilm.appliance.Appliance instances
+    a_new : Dictionary of eeris_nilm.appliance.Appliance instances
     Objects that we need to map from
 
-    a_to : Dictionary of eeris_nilm.appliance.Appliance instances
+    a_old : Dictionary of eeris_nilm.appliance.Appliance instances
     Objects that we need to map to
 
     t : float
@@ -306,36 +312,44 @@ def match_appliances(a_from, a_to, t=100.0, tol=5,
     Only consider the power consumption of the appliance (i.e., not
     activations) for matching
 
+    keep_old: bool
+    Whether to keep all the appliances in a_old (and add only those that have
+    not been matched).
+
     Returns
     -------
 
     out : A dictionary of the form { appliance_id: appliance } where
     appliance is an eeris_nilm.appliance.Appliance object and appliance_id
-    is the id of the appliance. This function maps the appliances in a_from
-    to a_to i.e., adjusts the appliance_id for the appliances that are
-    considered the same in a_from and a_to, keeping the ids of a_to. The
+    is the id of the appliance. This function maps the appliances in a_new
+    to a_old i.e., adjusts the appliance_id for the appliances that are
+    considered the same in a_new and a_old, keeping the ids of a_old. The
     dictionary also includes appliances that were not mapped (without
     changing their appliance_id).
     """
-    a = dict()
+    if keep_old:
+        a = a_old
+    else:
+        a = dict()
+
     mapping = dict()
-    for k in a_from.keys():
+    for k in a_new.keys():
         # Create the list of candidate matches for the k-th appliance
         candidates = []
-        for l in a_to.keys():
+        for l in a_old.keys():
             # Works only for two-state appliances. Remember that
             # signature[0] is a 1x2 vector with active and reactive power
             # (1st appliance state)
-            match, d = utils.match_power(a_from[k].signature[0],
-                                         a_to[l].signature[0],
+            match, d = utils.match_power(a_new[k].signature[0],
+                                         a_old[l].signature[0],
                                          active_only=False, t=t)
             if match:
                 if not only_power:
-                    p_from, p_to = _activations_overlap_pct(a_from[k],
-                                                            a_to[l],
+                    p_new, p_old = _activations_overlap_pct(a_new[k],
+                                                            a_old[l],
                                                             tol=tol)
                     # Minus for the sorting afterwards
-                    candidates.append((d, -p_to, l))
+                    candidates.append((d, -p_old, l))
                 else:
                     candidates.append((d, 0.0, l))
         if candidates:
@@ -347,17 +361,18 @@ def match_appliances(a_from, a_to, t=100.0, tol=5,
     # lists are unique (as is the case with appliances created in this
     # class).
     # TODO: Perform uniqueness checks!
-    for k in a_from.keys():
+    for k in a_new.keys():
         if k in mapping.keys():
             m = mapping[k]
-            a[m] = a_to[m]
+            if not keep_old:
+                a[m] = a_old[m]
             a[m]._mapped = True
             if copy_activations:
-                a[m].activations = a_from[k].activations.copy()
-                a[m].last_returned_end_ts = a_from[k].last_returned_end_ts
+                a[m].activations = a_new[k].activations.copy()
+                a[m].last_returned_end_ts = a_new[k].last_returned_end_ts
         else:
             # Unmapped new appliances
-            a[k] = a_from[k]
+            a[k] = a_new[k]
     return a
 
 

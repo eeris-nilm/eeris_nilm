@@ -54,5 +54,6 @@ def read_cenote(path, installation_id, date_start=None, date_end=None):
              "phaseanglecurrentvoltagel1": np.float64}
     cenote = pd.read_csv(path, index_col='cenote$timestamp',
                          sep=',', dtype=dtype)
+    cenote = cenote[cenote['installation_id'] == installation_id]
     data = cenote[['active', 'reactive', 'current', 'voltage']]
     return data

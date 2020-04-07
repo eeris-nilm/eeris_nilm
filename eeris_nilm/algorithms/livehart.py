@@ -447,13 +447,15 @@ class LiveHart(object):
             # Map to previous
             self.appliances = appliance.match_appliances(appliances,
                                                          self.appliances,
-                                                         copy_activations=True)
+                                                         copy_activations=True,
+                                                         keep_old=False)
         # Sync live appliances
         self.appliances_live = \
             appliance.match_appliances(self.appliances_live,
                                        self.appliances,
                                        t=2.0 * self.MATCH_THRESHOLD,
-                                       copy_activations=True)
+                                       copy_activations=True,
+                                       keep_old=True)
         # Alternative option, match only power
         # appliance.match_appliances(self.appliances_live, self.appliances,
         #                            only_power=True,

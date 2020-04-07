@@ -18,6 +18,8 @@ import numpy as np
 import pandas as pd
 import json
 import requests
+import time
+
 
 def get_segments(signal, mask, only_true=True):
     """
@@ -334,4 +336,5 @@ def request_with_retry(url, params, request='get', requests_limit=3600):
                 # Nothing we can do.
                 raise SystemExit(e)
             print("Retrying... %d / %d" % (n_r, requests_limit))
+            time.sleep(1.0)
     return r

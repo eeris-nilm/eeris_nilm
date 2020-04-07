@@ -390,7 +390,7 @@ class NILM(object):
             "start": st,
             "end": et
         }
-        r = requests.get(url, params)
+        r = utils.request_with_retry(url, params, request='get')
         data = utils.get_data_from_cenote_response(r)
         rstep = 3
         for i in range(0, data.shape[0], rstep):

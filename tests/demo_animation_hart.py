@@ -21,7 +21,10 @@ import matplotlib.pyplot as plt
 import matplotlib.animation as animation
 from matplotlib.table import table
 from matplotlib.font_manager import FontProperties
+from eeris_nilm.datasets import redd
 from eeris_nilm.datasets import eco
+from eeris_nilm.datasets import cenote
+from eeris_nilm.datasets import eeris
 from eeris_nilm.algorithms import livehart
 import datetime
 import logging
@@ -29,18 +32,30 @@ import logging
 
 class Demo(object):
     TIME_WINDOW = 1200
-    MODEL_SAVE_STEP = 20
+    MODEL_SAVE_STEP = 100
 
     def __init__(self, path, date_start, date_end, ax, axt,
-                 model_path_r=None, model_path_w=None):
+                 dataset='redd', inst_id=None, model_path_r=None,
+                 model_path_w=None):
+        self.step = 3
+        # self.step = 3600
+
         # Load data
-        self.step = 7
-        _, self.power = eco.read_eco(path, date_start, date_end)
-        self.xdata, self.ydata, self.ydata_r = [], [], []
+        if dataset == 'redd':
+            self.data, self.labels = redd.read_redd(path, date_start, date_end,
+                                                    get_channels=False)
+            self.power = self.data['mains']
+        elif dataset == 'eco':
+            _, self.power = eco.read_eco(path, date_start, date_end)
+        elif dataset == 'cenote':
+            self.power = cenote.read_cenote(path, inst_id, date_start, date_end)
+        elif dataset == 'eeris':
+            self.power = eeris.read_eeris(path, inst_id, date_start, date_end)
+
+        self.xdata, self.ydata = [], []
         self.ymatch = None
 
         # Prepare model.
-        # TODO: Don't keep the files open for writing. Use them when needed.
         self.model_path_r = model_path_r
         new_model = False
         if model_path_r is None:
@@ -49,7 +64,7 @@ class Demo(object):
             try:
                 with open(self.model_path_r, "rb") as fp_r:
                     self.model = dill.load(fp_r)
-                self.start_ts = self.model._last_processed_ts + \
+                self.start_ts = self.model.last_processed_ts + \
                     datetime.timedelta(seconds=1)
             except IOError:
                 print("Warning: Cannot read model file." +
@@ -68,7 +83,6 @@ class Demo(object):
         self.pause = False
         self.ax = ax
         self.line_active, = ax.plot([], [], 'b')
-        self.line_reactive, = ax.plot([], [], 'c')
         self.line_est, = ax.plot([], [], 'r')
         self.line_match, = ax.plot([], [], 'm')
         self.ax.set_xlim(0, 100)
@@ -88,9 +102,8 @@ class Demo(object):
 
     def init(self):
         self.line_active.set_data([], [])
-        self.line_reactive.set_data([], [])
         self.line_est.set_data([], [])
-        return (self.line_active, self.line_reactive, self.line_est)
+        return (self.line_active, self.line_est)
 
     def data_gen(self):
         self.power = self.power.loc[self.power.index > self.start_ts]
@@ -106,22 +119,18 @@ class Demo(object):
         # Update lines
         self.xdata.extend(list(range(t, t + self.step)))
         self.ydata.extend(y['active'].values.tolist())
-        self.ydata_r.extend(y['reactive'].values.tolist())
         lim = min(len(self.xdata), self.time_window)
         self.line_active.set_data(self.xdata[-lim:], self.ydata[-lim:])
-        self.line_reactive.set_data(self.xdata[-lim:], self.ydata_r[-lim:])
         self.line_est.set_data(self.xdata[-lim:],
                                self.model._yest.tolist()[-lim:])
         self.line_match.set_data(self.xdata[-lim:],
                                  self.model._ymatch.tolist()[-lim:])
         # Update axis limits
         xmin, xmax = self.ax.get_xlim()
-        xmin = max(0, t - self.time_window)
+        xmin = max(0, t + self.step - self.time_window)
         xmax = max(self.time_window, t + self.step)
-        ymin = min(self.ydata[-self.time_window:] +
-                   self.ydata_r[-self.time_window:])  # List concatenation
-        ymax = max(self.ydata[-self.time_window:] +
-                   self.ydata_r[-self.time_window:])  # List concatenation
+        ymin = min(self.ydata[-self.time_window:] + [0])  # List concatenation
+        ymax = max(self.ydata[-self.time_window:] + [0])  # List concatenation
         self.ax.set_xlim(xmin - 100, xmax + 100)
         self.ax.set_ylim(ymin - 50, ymax + 100)
         self.ax.figure.canvas.draw()
@@ -129,11 +138,10 @@ class Demo(object):
         if not self.model.live:
             cell_text = [['None', '-', '-']]
         else:
-            cell_text = [[m.name, m.signature[0], m.signature[1]]
+            cell_text = [[m.name, m.signature[0, 0], m.signature[0, 1]]
                          for m in self.model.live]
         cell_text.append(['Other', self.model.residual_live[0], '-'])
         cell_text.append(['Background', self.model.background_active, '-'])
-        # cell_text.append(['Avg Power', self.model.running_avg_power[0], '-'])
         tab = table(self.axt, cell_text,
                     colLabels=['Appliance', 'Active', 'Reactive'],
                     cellLoc='left', colLoc='left', edges='horizontal')
@@ -155,27 +163,53 @@ class Demo(object):
                 dill.dump(self.model, fp)
         self.save_counter += 1
         return self.line_active, \
-            self.line_reactive, \
             self.line_est, \
             self.line_match
 
 
 logging.basicConfig(level=logging.DEBUG)
+if len(sys.argv) == 0:
+    dataset = 'redd'
+else:
+    dataset = sys.argv[1]
 
-# Setup
-# p = '/media/data/datasets/NILM/ECO/02_sm_csv/02'
-p = 'tests/data/01_sm_csv/01'
-date_start = '2012-06-10T20:55'
-date_end = '2012-06-20T23:00'
+# Edit these to fit your setup
+inst_id = None
+if dataset == 'redd':
+    p = 'tests/data/house_1'
+    date_start = '2011-04-18T01:00'
+    date_end = '2011-04-30T23:59'
+    model_path_r = 'tests/data/model_redd.dill'
+    model_path_w = 'tests/data/model_redd.dill'
+elif dataset == 'eco':
+    p = 'tests/data/01_sm_csv/01'
+    date_start = '2012-06-10T20:55'
+    date_end = '2012-06-20T23:00'
+    model_path_r = 'tests/data/model_eco.dill'
+    model_path_w = 'tests/data/model_eco.dill'
+elif dataset == 'cenote':
+    p = 'tests/data/pid7870cd27f3c_integration_20200113.csv'
+    date_start = '2019-12-01T00:00'
+    date_end = '2020-01-08T00:00'
+    inst_id = '5e05d5c83e442d4f78db036f'
+    model_path_r = 'tests/data/model_cenote.dill'
+    model_path_w = 'tests/data/model_cenote.dill'
+elif dataset == 'eeris':
+    p = 'tests/data/eeris/124B0011EEE909....'
+    date_start = '2019-12-01T00:00'
+    date_end = '2020-01-08T00:00'
+    inst_id = '5e05d5c83e442d4f78db036f'
+    model_path_r = 'tests/data/model_eeris.dill'
+    model_path_w = 'tests/data/model_eeris.dill'
+
 fig = plt.figure(figsize=(19.2, 10.8), dpi=100)
 ax = plt.subplot(2, 1, 1)
 axt = plt.subplot(2, 1, 2)
-model_path_r = 'tests/data/model_eco.dill'
-model_path_w = 'tests/data/model_eco.dill'
-d = Demo(p, date_start, date_end, ax, axt, model_path_r=model_path_r,
-         model_path_w=model_path_w)
+# plt.ion()
+d = Demo(p, date_start, date_end, ax, axt, dataset=dataset, inst_id=inst_id,
+         model_path_r=model_path_r, model_path_w=model_path_w)
 ani = animation.FuncAnimation(fig, d, frames=d.data_gen,
-                              init_func=d.init, interval=1,
+                              init_func=d.init, interval=50,
                               fargs=None, blit=False, repeat=False,
                               save_count=sys.maxsize)
 plt.show()
