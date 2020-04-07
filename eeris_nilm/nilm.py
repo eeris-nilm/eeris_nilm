@@ -361,7 +361,7 @@ class NILM(object):
         model = self._models[inst_id]
         url = self._computations_url + inst_id
         # Main recomputation loop.
-        rstep=step
+        rstep = step
         for ts in range(start_ts, end_ts-warmup_period, rstep):
             # Endpoint expects timestamp in milliseconds since unix epoch
             st = ts * 1000
@@ -374,7 +374,7 @@ class NILM(object):
                 "start": st,
                 "end": et
             }
-            r = requests.get(url, params)
+            r = utils.request_with_retry(url, params, request='get')
             data = utils.get_data_from_cenote_response(r)
             if data is None:
                 continue

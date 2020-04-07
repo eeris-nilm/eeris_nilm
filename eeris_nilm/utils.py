@@ -17,7 +17,7 @@ limitations under the License.
 import numpy as np
 import pandas as pd
 import json
-
+import requests
 
 def get_segments(signal, mask, only_true=True):
     """
@@ -299,3 +299,39 @@ def get_data_from_cenote_response(resp):
     data = data.set_index('timestamp')
     data.index.name = None
     return data
+
+
+def request_with_retry(url, params, request='get', requests_limit=3600):
+    """
+    Calls requests with parameters url and params. If it fails, it retries
+    requests_limit times (with a sleep time of 1s in-between).
+    """
+    n_r = 0
+    f = None
+    if request == 'get':
+        f = requests.get
+    elif request == 'put':
+        f = requests.put
+    elif request == 'post':
+        f = requests.post
+    elif request == 'delete':
+        f = requests.delete
+    else:
+        raise ValueError("Current implementation does not handle %s requests",
+                         request)
+
+    while n_r < requests_limit:
+        try:
+            if request == 'get':
+                r = f(url, params)
+            elif request == 'put':
+                r = f(url, params)
+            break
+        except requests.exceptions.RequestException as e:
+            print("Request error: " + e)
+            n_r += 1
+            if n_r >= requests_limit:
+                # Nothing we can do.
+                raise SystemExit(e)
+            print("Retrying... %d / %d" % (n_r, requests_limit))
+    return r
