@@ -205,7 +205,7 @@ elif dataset == 'eeris':
     p = ('tests/data/eeRIS/snapshot_07042020/124B0011EEE909/124B0002CC3CCD'
          '/124B0011EEE909_124B0002CC3CCD_')
     date_start = '2019-12-01T00:00'
-    date_end = '2020-01-08T00:00'
+    date_end = '2019-12-03T00:00'
     inst_id = '5e05d5c83e442d4f78db036f'
     model_path_r = 'tests/data/model_eeris.dill'
     model_path_w = 'tests/data/model_eeris.dill'

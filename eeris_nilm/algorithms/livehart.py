@@ -24,14 +24,15 @@ import threading
 import logging
 import datetime
 import time
+import copy
 import bson
 
 # TODO: Background has been computed on normalized data and may have
 # discrepancies from the actual background consumption (as measured through the
 # meter)
-
 # TODO: Breakdown into smaller modules (incl. subclassing and separation of
 # "live" and retrospective analysis)
+# TODO: Check for inactive appliances
 
 
 class LiveHart(object):
@@ -345,6 +346,47 @@ class LiveHart(object):
         # Update last processed
         self.last_processed_ts = self._buffer.index[-1]
 
+    def _sync_appliances(self, a_new, a_old, mapping):
+        """
+        Map the newly detected appliances to the old ones.
+        """
+        a = dict()
+        for k in a_new.keys():
+            if k in mapping.keys():
+                m = mapping[k]
+                a[m] = a_old[m]
+                a[m].activations = a_new[k].activations.copy()
+                a[m].last_returned_end_ts = a_new[k].last_returned_end_ts
+            else:
+                # Unmapped new appliances
+                a[k] = a_new[k]
+        return a
+
+    def _sync_appliances_live(self, a_live, a_cluster, mapping):
+        """
+        Map the live appliances to the ones detected by clustering (some design
+        choices made here).
+        """
+        a = dict()
+        for k in a_live.keys():
+            if k in mapping.keys():
+                m = mapping[k]
+                # TODO: Do we need to copy signature etc?
+                a[m] = copy.deepcopy(a_cluster[m])
+                a[m].activations = a_live[k].activations.copy()
+                a[m].last_returned_end_ts = a_live[k].last_returned_end_ts
+                a[m].live = True
+                del a_live[k]
+            else:
+                # Unmapped new appliances
+                a[k] = a_live[k]
+        # TODO: Is it correct to copy clustered appliances to live?
+        for m in a_cluster.keys():
+            if m not in a:
+                a[m] = copy.deepcopy(a_cluster[m])
+                a[m].live = True
+        return a
+
     def _static_cluster(self, method="dbscan"):
         """
         Clustering step of Hart's method. Here it is implemented as a static
@@ -444,22 +486,19 @@ class LiveHart(object):
             # First time we detect appliances
             self.appliances = appliances
         else:
-            # Map to previous
-            self.appliances = appliance.match_appliances(appliances,
-                                                         self.appliances,
-                                                         copy_activations=True,
-                                                         keep_old=False)
-        # Sync live appliances
-        self.appliances_live = \
-            appliance.match_appliances(self.appliances_live,
-                                       self.appliances,
-                                       t=2.0 * self.MATCH_THRESHOLD,
-                                       copy_activations=True,
-                                       keep_old=True)
-        # Alternative option, match only power
-        # appliance.match_appliances(self.appliances_live, self.appliances,
-        #                            only_power=True,
-        #                            copy_activations=False)
+            # Map to previous.
+            mapping = appliance.appliance_mapping(appliances, self.appliances)
+
+            self.appliances = self._sync_appliances(appliances, self.appliances,
+                                                    mapping)
+        # Sync live appliances.
+        mapping = appliance.appliance_mapping(self.appliances_live,
+                                              self.appliances)
+        self.appliances_live = self._sync_appliances_live(self.appliances_live,
+                                                          self.appliances,
+                                                          mapping)
+        for k in self.appliances_live.keys():
+            self.appliances_live[k].live = True
 
         # Set timestamp
         self._last_clustering_ts = self._buffer.index[-1]
@@ -621,6 +660,7 @@ class LiveHart(object):
             if not candidates:
                 # New appliance. Add to live dictionary using id as key.
                 self.appliances_live[a.appliance_id] = a
+                self.appliances_live[a.appliance_id].live = True
                 self.live.insert(0, a)
                 # Increase display id for next appliance
                 self._appliance_display_id += 1

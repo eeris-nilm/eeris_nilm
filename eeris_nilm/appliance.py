@@ -14,13 +14,12 @@ See the License for the specific language governing permissions and
 limitations under the License.
 """
 
-from eeris_nilm import utils
 import pandas as pd
 import numpy as np
-# from numpy import linalg as LA
 import scipy.signal
 import sklearn.cluster
 import logging
+from eeris_nilm import utils
 
 
 # ##### Static methods outside class #######
@@ -284,11 +283,10 @@ def _activations_overlap_pct(a1, a2, tol=5, n_limit=100):
     return (pct1, pct2)
 
 
-def match_appliances(a_new, a_old, t=100.0, tol=5, copy_activations=True,
-                     only_power=False, keep_old=False):
+def appliance_mapping(a_new, a_old, t=100.0, tol=5, only_power=False):
     """
-    Helper function to match between two dictionaries of appliances, using
-    both their power consumption and their activation timing.
+    Helper function to create a mapping between two dictionaries of appliances,
+    using both their power consumption and their activation timing.
 
     Parameters
     ----------
@@ -304,34 +302,16 @@ def match_appliances(a_new, a_old, t=100.0, tol=5, copy_activations=True,
     tol: float
     Seconds tolerance for activation matching
 
-    copy_activations: bool
-    Whether to copy the activations of the 'from' appliance to the 'to'
-    appliance.
-
     only_power: bool
     Only consider the power consumption of the appliance (i.e., not
     activations) for matching
 
-    keep_old: bool
-    Whether to keep all the appliances in a_old (and add only those that have
-    not been matched).
-
     Returns
     -------
 
-    out : A dictionary of the form { appliance_id: appliance } where
-    appliance is an eeris_nilm.appliance.Appliance object and appliance_id
-    is the id of the appliance. This function maps the appliances in a_new
-    to a_old i.e., adjusts the appliance_id for the appliances that are
-    considered the same in a_new and a_old, keeping the ids of a_old. The
-    dictionary also includes appliances that were not mapped (without
-    changing their appliance_id).
+    out : A dictionary of the form { id_new: id_old } mapping the new ids to the
+    old ones.
     """
-    if keep_old:
-        a = a_old
-    else:
-        a = dict()
-
     mapping = dict()
     for k in a_new.keys():
         # Create the list of candidate matches for the k-th appliance
@@ -357,24 +337,6 @@ def match_appliances(a_new, a_old, t=100.0, tol=5, copy_activations=True,
             # Simplistic: Just get the best match overall
             mapping[k] = candidates[0][2]
 
-    # Perform the mapping. This loop assumes that keys in both
-    # lists are unique (as is the case with appliances created in this
-    # class).
-    # TODO: Perform uniqueness checks!
-    for k in a_new.keys():
-        if k in mapping.keys():
-            m = mapping[k]
-            if not keep_old:
-                a[m] = a_old[m]
-            a[m]._mapped = True
-            if copy_activations:
-                a[m].activations = a_new[k].activations.copy()
-                a[m].last_returned_end_ts = a_new[k].last_returned_end_ts
-        else:
-            # Unmapped new appliances
-            a[k] = a_new[k]
-    return a
-
 
 # ##### Class definition #######
 
@@ -392,6 +354,9 @@ class Appliance(object):
 
     def __init__(self, appliance_id, name, category, signature=None,
                  nominal_voltage=230.0):
+        # Note that two appliance instances may have the same id,
+        # if they correspond to the same physical appliance (e.g., one may be
+        # "live", another "verified", etc).
         self.appliance_id = appliance_id
         self.name = name
         self.category = category
@@ -401,6 +366,7 @@ class Appliance(object):
         self.final = False  # We are allowed to modify signature
         self.verified = False  # Not sure it is actually a new appliance
         self.inactive = False  # Has it not been used for a long time?
+        self.live = False  # Is this a "live" appliance?
         self.p_signature = signature  # Previous signature (for running average)
         # Should we keep data regarding activation of this applicance?
         self.store_activations = True

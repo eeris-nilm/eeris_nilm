@@ -33,6 +33,7 @@ from eeris_nilm.algorithms import livehart
 
 # TODO: Refactoring to break into eeris-specific and general-purpose components
 # TODO: Support for multiple processes for specified list of installation ids
+# TODO: Edit functionality for appliances
 
 
 class NILM(object):
@@ -629,6 +630,7 @@ class NILM(object):
         prev_category = model.appliances[appliance_id].category
         model.appliances[appliance_id].name = name
         model.appliances[appliance_id].category = category
+        model.appliances[appliance_id].verifyied = True
         logging.debug(("Installation: %s. Renamed appliance %s from %s with "
                        "category %s to %s with category %s") %
                       (inst_id, appliance_id, prev_name,
