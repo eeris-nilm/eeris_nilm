@@ -17,17 +17,20 @@ limitations under the License.
 # Demo of edge detection without REST service implementation
 import sys
 import dill
+import datetime
+import logging
+import pandas as pd
+
 import matplotlib.pyplot as plt
 import matplotlib.animation as animation
 from matplotlib.table import table
 from matplotlib.font_manager import FontProperties
+
 from eeris_nilm.datasets import redd
 from eeris_nilm.datasets import eco
 from eeris_nilm.datasets import cenote
 from eeris_nilm.datasets import eeris
 from eeris_nilm.algorithms import livehart
-import datetime
-import logging
 
 
 class Demo(object):
@@ -35,10 +38,9 @@ class Demo(object):
     MODEL_SAVE_STEP = 100
 
     def __init__(self, path, date_start, date_end, ax, axt,
-                 dataset='redd', inst_id=None, model_path_r=None,
+                 dataset='redd', step=3, inst_id=None, model_path_r=None,
                  model_path_w=None):
-        self.step = 3
-        # self.step = 3600
+        self.step = step
 
         # Load data
         if dataset == 'redd':
@@ -50,7 +52,9 @@ class Demo(object):
         elif dataset == 'cenote':
             self.power = cenote.read_cenote(path, inst_id, date_start, date_end)
         elif dataset == 'eeris':
-            self.power = eeris.read_eeris(path, inst_id, date_start, date_end)
+            self.power = eeris.read_eeris(path, date_start, date_end)
+        else:
+            raise ValueError("Unknown dataset %s" % (dataset))
 
         self.xdata, self.ydata = [], []
         self.ymatch = None
@@ -66,6 +70,8 @@ class Demo(object):
                     self.model = dill.load(fp_r)
                 self.start_ts = self.model.last_processed_ts + \
                     datetime.timedelta(seconds=1)
+                date_start_ts = pd.Timestamp(date_start)
+                self.start_sec = (self.start_ts - date_start_ts).seconds
             except IOError:
                 print("Warning: Cannot read model file." +
                       "Creating model from scratch.")
@@ -74,9 +80,9 @@ class Demo(object):
                 new_model = False  # Not needed, for emphasis/readability
         if new_model:
             self.model = livehart.LiveHart(installation_id=1)
-            self.start_ts = date_start
+            self.start_ts = pd.Timestamp(date_start)
+            self.start_sec = 0
         self.model_path_w = model_path_w
-        self.current_sec = 0
         self.prev = self.power['active'].iloc[0]
 
         # Plot parameters
@@ -110,12 +116,11 @@ class Demo(object):
         end = self.power.shape[0] - self.power.shape[0] % self.step
         for i in range(0, end, self.step):
             data = self.power.iloc[i:i+self.step]
-            yield i, data
+            yield self.start_sec + i, data
 
     def __call__(self, data):
         t, y = data
         self.model.update(y)
-        self.current_sec += self.step
         # Update lines
         self.xdata.extend(list(range(t, t + self.step)))
         self.ydata.extend(y['active'].values.tolist())
@@ -168,12 +173,14 @@ class Demo(object):
 
 
 logging.basicConfig(level=logging.DEBUG)
-if len(sys.argv) == 0:
+if len(sys.argv) == 1:
     dataset = 'redd'
 else:
     dataset = sys.argv[1]
 
-# Edit these to fit your setup
+
+# Edit these to fit your setup.
+step = 3600
 inst_id = None
 if dataset == 'redd':
     p = 'tests/data/house_1'
@@ -195,7 +202,8 @@ elif dataset == 'cenote':
     model_path_r = 'tests/data/model_cenote.dill'
     model_path_w = 'tests/data/model_cenote.dill'
 elif dataset == 'eeris':
-    p = 'tests/data/eeris/124B0011EEE909....'
+    p = ('tests/data/eeRIS/snapshot_07042020/124B0011EEE909/124B0002CC3CCD'
+         '/124B0011EEE909_124B0002CC3CCD_')
     date_start = '2019-12-01T00:00'
     date_end = '2020-01-08T00:00'
     inst_id = '5e05d5c83e442d4f78db036f'
@@ -206,8 +214,8 @@ fig = plt.figure(figsize=(19.2, 10.8), dpi=100)
 ax = plt.subplot(2, 1, 1)
 axt = plt.subplot(2, 1, 2)
 # plt.ion()
-d = Demo(p, date_start, date_end, ax, axt, dataset=dataset, inst_id=inst_id,
-         model_path_r=model_path_r, model_path_w=model_path_w)
+d = Demo(p, date_start, date_end, ax, axt, dataset=dataset, step=step,
+         inst_id=inst_id, model_path_r=model_path_r, model_path_w=model_path_w)
 ani = animation.FuncAnimation(fig, d, frames=d.data_gen,
                               init_func=d.init, interval=50,
                               fargs=None, blit=False, repeat=False,
