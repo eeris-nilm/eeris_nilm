@@ -336,6 +336,7 @@ def appliance_mapping(a_new, a_old, t=100.0, tol=5, only_power=False):
             candidates.sort()
             # Simplistic: Just get the best match overall
             mapping[k] = candidates[0][2]
+    return mapping
 
 
 # ##### Class definition #######

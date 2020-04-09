@@ -346,7 +346,7 @@ class LiveHart(object):
         # Update last processed
         self.last_processed_ts = self._buffer.index[-1]
 
-    def _sync_appliances(self, a_new, a_old, mapping):
+    def _sync_appliances(self, a_new, mapping):
         """
         Map the newly detected appliances to the old ones.
         """
@@ -354,38 +354,48 @@ class LiveHart(object):
         for k in a_new.keys():
             if k in mapping.keys():
                 m = mapping[k]
-                a[m] = a_old[m]
+                a[m] = self.appliances[m]
                 a[m].activations = a_new[k].activations.copy()
                 a[m].last_returned_end_ts = a_new[k].last_returned_end_ts
             else:
                 # Unmapped new appliances
                 a[k] = a_new[k]
-        return a
+        self.appliances = a
 
-    def _sync_appliances_live(self, a_live, a_cluster, mapping):
+    def _sync_appliances_live(self, a_new, mapping):
         """
         Map the live appliances to the ones detected by clustering (some design
         choices made here).
         """
         a = dict()
-        for k in a_live.keys():
+        del_keys = []
+        for k in self.appliances_live.keys():
             if k in mapping.keys():
                 m = mapping[k]
                 # TODO: Do we need to copy signature etc?
-                a[m] = copy.deepcopy(a_cluster[m])
-                a[m].activations = a_live[k].activations.copy()
-                a[m].last_returned_end_ts = a_live[k].last_returned_end_ts
+                a[m] = copy.deepcopy(a_new[m])
+                a[m].activations = self.appliances_live[k].activations.copy()
+                a[m].last_returned_end_ts = \
+                    self.appliances_live[k].last_returned_end_ts
                 a[m].live = True
-                del a_live[k]
+                del_keys.append(k)
+                # In case the appliance is operating, replace with new live.
+                try:
+                    idx = self.live.index(self.appliances_live[k])
+                    self.live[idx] = a[m]
+                except ValueError:
+                    continue
             else:
-                # Unmapped new appliances
-                a[k] = a_live[k]
+                a[k] = self.appliances_live[k]
         # TODO: Is it correct to copy clustered appliances to live?
-        for m in a_cluster.keys():
+        for m in a_new.keys():
             if m not in a:
-                a[m] = copy.deepcopy(a_cluster[m])
+                a[m] = copy.deepcopy(a_new[m])
                 a[m].live = True
-        return a
+        for k in del_keys:
+            if k in a:
+                del a[k]
+        self.appliances_live = a
 
     def _static_cluster(self, method="dbscan"):
         """
@@ -488,18 +498,11 @@ class LiveHart(object):
         else:
             # Map to previous.
             mapping = appliance.appliance_mapping(appliances, self.appliances)
-
-            self.appliances = self._sync_appliances(appliances, self.appliances,
-                                                    mapping)
+            self._sync_appliances(appliances, mapping)
         # Sync live appliances.
         mapping = appliance.appliance_mapping(self.appliances_live,
                                               self.appliances)
-        self.appliances_live = self._sync_appliances_live(self.appliances_live,
-                                                          self.appliances,
-                                                          mapping)
-        for k in self.appliances_live.keys():
-            self.appliances_live[k].live = True
-
+        self._sync_appliances_live(self.appliances, mapping)
         # Set timestamp
         self._last_clustering_ts = self._buffer.index[-1]
 
@@ -573,7 +576,7 @@ class LiveHart(object):
         # pbuffer = self._edges.loc[~(self._edges['mark']).astype(bool)]
         # Helper, to keep code tidy
         e = self._edges
-        len_e = len(self._edges)
+        len_e = self._edges.shape[0]
         # Multiple loops, what are the alternatives?
         # Distance of edges
         for dst in range(1, len_e):
@@ -661,6 +664,7 @@ class LiveHart(object):
                 # New appliance. Add to live dictionary using id as key.
                 self.appliances_live[a.appliance_id] = a
                 self.appliances_live[a.appliance_id].live = True
+                # Display as live appliance at the top of the list
                 self.live.insert(0, a)
                 # Increase display id for next appliance
                 self._appliance_display_id += 1
@@ -669,7 +673,8 @@ class LiveHart(object):
                 self.live.insert(0, candidates[0][0])
             # Done
             return
-        # Appliance cycle stop. Does it match against previous edges?
+        # Appliance cycle stop. Does it match against previous edges (starting
+        # from most recent, at 0)?
         matched = False
         for i in range(len(self.live)):
             # e0 = self.live[i].signature.reshape(-1, 1).T
@@ -730,7 +735,9 @@ class LiveHart(object):
             match, d = utils.match_power(self.appliances_live[k].signature[0],
                                          a.signature[0], active_only=False,
                                          t=self.MATCH_THRESHOLD)
-            if match:
+            # We want to only consider appliances that are not already
+            # on.
+            if match and (self.appliances_live[k] not in self.live):
                 candidates.append((self.appliances_live[k], d))
             # TODO: Alternative approach (evaluate):
             # d = Appliance.distance(self.appliances_live[k], a)
@@ -818,7 +825,7 @@ class LiveHart(object):
             total_estimated += a.signature[0]
         total_estimated += self.background_active
         # Allow for 10% error in edge estimation
-        if self.running_avg_power[0] < 0.9 * total_estimated[0]:
+        if self.running_avg_power[0] < 0.8 * total_estimated[0]:
             # We may have made a matching error, and an appliance should have
             # been switched off. Heuristic solution here.
             # self.live = []
@@ -962,7 +969,6 @@ class LiveHart(object):
         self._lock.release()
 
         if td.total_seconds() / 3600.0 >= self.CLUSTER_STEP_HOURS:
-            self.force_clustering(method=self.CLUSTERING_METHOD)
-            # In case we don't want threads (for debugging)
-            # self._static_cluster()
+            self.force_clustering(method=self.CLUSTERING_METHOD,
+                                  start_thread=False)
         time.sleep(0.01)
