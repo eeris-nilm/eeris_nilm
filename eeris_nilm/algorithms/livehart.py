@@ -369,6 +369,8 @@ class LiveHart(object):
         """
         a = dict()
         del_keys = []
+        # TODO: Correct for case of multiple live appliances mapping to the same
+        # cluster.
         for k in self.appliances_live.keys():
             if k in mapping.keys():
                 m = mapping[k]
@@ -502,7 +504,8 @@ class LiveHart(object):
         # Sync live appliances.
         mapping = appliance.appliance_mapping(self.appliances_live,
                                               self.appliances)
-        self._sync_appliances_live(self.appliances, mapping)
+        self._sync_appliances_live(self.appliances, mapping,
+                                   t=self.MATCH_THRESHOLD)
         # Set timestamp
         self._last_clustering_ts = self._buffer.index[-1]
 

@@ -283,7 +283,7 @@ def _activations_overlap_pct(a1, a2, tol=5, n_limit=100):
     return (pct1, pct2)
 
 
-def appliance_mapping(a_new, a_old, t=100.0, tol=5, only_power=False):
+def appliance_mapping(a_new, a_old, t=50.0, tol=5, only_power=False):
     """
     Helper function to create a mapping between two dictionaries of appliances,
     using both their power consumption and their activation timing.
