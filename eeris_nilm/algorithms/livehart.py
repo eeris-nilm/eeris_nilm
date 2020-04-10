@@ -55,7 +55,7 @@ class LiveHart(object):
     # Limiters/thresholds
     MAX_WINDOW_DAYS = 100
     MAX_NUM_STATES = 1000
-    MAX_DISPLAY_SECONDS = 1 * 3600
+    MAX_DISPLAY_SECONDS = 5 * 3600
     STEADY_THRESHOLD = 15
     SIGNIFICANT_EDGE = 50
     STEADY_SAMPLES_NUM = 5
@@ -362,41 +362,61 @@ class LiveHart(object):
                 a[k] = a_new[k]
         self.appliances = a
 
-    def _sync_appliances_live(self, a_new, mapping):
+    def _sync_appliances_live(self, mapping):
         """
         Map the live appliances to the ones detected by clustering (some design
         choices made here).
         """
+        # TODO: This function is more complicated than it needs to be because
+        # different options need to be tested for the matching.
+
+        # TODO: Allow many live appliances to map to the same cluster. Also,
+        # consider copying active appliances to the live set after all.
         a = dict()
-        del_keys = []
-        # TODO: Correct for case of multiple live appliances mapping to the same
-        # cluster.
+        mapped_keys = []
+        a_new = self.appliances
         for k in self.appliances_live.keys():
             if k in mapping.keys():
                 m = mapping[k]
-                # TODO: Do we need to copy signature etc?
-                a[m] = copy.deepcopy(a_new[m])
-                a[m].activations = self.appliances_live[k].activations.copy()
-                a[m].last_returned_end_ts = \
-                    self.appliances_live[k].last_returned_end_ts
-                a[m].live = True
-                del_keys.append(k)
+                # Has the appliance already been mapped?
+                # TODO: This is a hack. Better solutions? Is this an edge case?
+                if m in mapped_keys:
+                    logging.DEBUG(("Appliance %s (%s) already mapped, ignoring"
+                                   "mapping of %s") %
+                                  (a_new[m].name, m,
+                                   self.appliances_live[k].name),
+                                  stack_info=True)
+                    continue
+                # TODO: Simpler solution, if we decide to just keep the live
+                # appliance. Just change the name of self.appliances_live[k] and
+                # do nothing else.
+                # TODO: We keep the live signature. Is this correct?
+                a[k] = copy.deepcopy(self.appliances_live[k])
+                a[k].live = True
+                a[k].name = a_new[m].name
+                mapped_keys.append(m)
                 # In case the appliance is operating, replace with new live.
                 try:
                     idx = self.live.index(self.appliances_live[k])
-                    self.live[idx] = a[m]
+                    self.live[idx] = a[k]
                 except ValueError:
                     continue
             else:
+                # Non-mapped appliances remain the same, so self.live shouldn't
+                # be affected.
                 a[k] = self.appliances_live[k]
-        # TODO: Is it correct to copy clustered appliances to live?
-        for m in a_new.keys():
-            if m not in a:
-                a[m] = copy.deepcopy(a_new[m])
-                a[m].live = True
-        for k in del_keys:
-            if k in a:
-                del a[k]
+        # TODO: Is it correct to copy non-matched, clustered appliances to live?
+        # FOR NOW WE DONT DO IT.
+        # Interesting side-effect. A cluster is not mapped. But then it is
+        # copied. In the next iteration it is mapped (they should match) and for
+        # this reason it is removed (since it is included in del_keys). This may
+        # be a source of bugs, so we keep it simple for now and do not copy
+        # non-matched, clustered appliances.
+        #
+        # for m in a_new.keys():
+        #     if m not in a:
+        #         a[m] = copy.deepcopy(a_new[m])
+        #         a[m].live = True
         self.appliances_live = a
 
     def _static_cluster(self, method="dbscan"):
@@ -503,9 +523,9 @@ class LiveHart(object):
             self._sync_appliances(appliances, mapping)
         # Sync live appliances.
         mapping = appliance.appliance_mapping(self.appliances_live,
-                                              self.appliances)
-        self._sync_appliances_live(self.appliances, mapping,
-                                   t=self.MATCH_THRESHOLD)
+                                              self.appliances,
+                                              t=2*self.MATCH_THRESHOLD)
+        self._sync_appliances_live(mapping)
         # Set timestamp
         self._last_clustering_ts = self._buffer.index[-1]
 
@@ -660,7 +680,6 @@ class LiveHart(object):
             category = 'unknown'
             a = appliance.Appliance(appliance_id, name, category,
                                     signature=e.reshape(-1, 1).T)
-            a.start_ts = self.last_processed_ts  # For activations
             # Does this look like a known appliance that isn't already matched?
             candidates = self._match_appliances_live(a)
             if not candidates:
@@ -674,6 +693,8 @@ class LiveHart(object):
             else:
                 # Match with previous
                 self.live.insert(0, candidates[0][0])
+            # For activations
+            self.live[0].start_ts = self._edge_start_ts
             # Done
             return
         # Appliance cycle stop. Does it match against previous edges (starting
@@ -687,7 +708,8 @@ class LiveHart(object):
             if match:
                 # Store live activations as well.
                 start_ts = self.live[i].start_ts
-                end_ts = self.last_processed_ts
+                # As in Hart's edge matching. This could be edge_end_ts
+                end_ts = self._edge_start_ts
                 active = self.live[i].signature[0][0]
                 self.live[i].append_activation(start_ts, end_ts, active)
                 self.live.pop(i)

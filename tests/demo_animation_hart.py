@@ -34,7 +34,9 @@ from eeris_nilm.algorithms import livehart
 
 
 class Demo(object):
-    TIME_WINDOW = 1200
+    # Change this to "zoom-in/zoom-out" in the graph
+    TIME_WINDOW = 5*3600
+    # How often should the model be saved?
     MODEL_SAVE_STEP = 100
 
     def __init__(self, path, date_start, date_end, ax, axt,
@@ -180,7 +182,7 @@ else:
 
 
 # Edit these to fit your setup.
-step = 3600
+step = 20
 inst_id = None
 if dataset == 'redd':
     p = 'tests/data/house_1'

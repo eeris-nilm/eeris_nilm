@@ -206,7 +206,7 @@ def match_appliances_power(a_from, a_to, t=35.0, copy_activations=True):
     return a
 
 
-def _activations_overlap_pct(a1, a2, tol=5, n_limit=100):
+def _activations_overlap_pct(a1, a2, tol=5, n_limit=500):
     """
     Given two appliances with their activations, identify the percentage of
     matched activations. For a pair of activations to match, they need to
@@ -262,15 +262,16 @@ def _activations_overlap_pct(a1, a2, tol=5, n_limit=100):
             if start2 - start1 < -tol:
                 idx2 += 1
                 continue
-            if abs(start2 - start1) < tol:
-                if abs(end2 - end1) < tol:
+            if abs(start2 - start1) <= tol:
+                if abs(end2 - end1) <= tol:
                     # match
                     matched += 1
                 idx2 += 1
                 continue
-
             if start2 - start1 > tol:
                 break
+            # Should never reach here, but just in case
+            idx2 += 1
         idx1 += 1
     if v1.shape[0] > 0:
         pct1 = matched / v1.shape[0]
@@ -283,7 +284,7 @@ def _activations_overlap_pct(a1, a2, tol=5, n_limit=100):
     return (pct1, pct2)
 
 
-def appliance_mapping(a_new, a_old, t=50.0, tol=5, only_power=False):
+def appliance_mapping(a_new, a_old, t=50.0, tol=5, p_t=0.3, only_power=False):
     """
     Helper function to create a mapping between two dictionaries of appliances,
     using both their power consumption and their activation timing.
@@ -301,6 +302,10 @@ def appliance_mapping(a_new, a_old, t=50.0, tol=5, only_power=False):
 
     tol: float
     Seconds tolerance for activation matching
+
+    p_t: float
+    Percentage of a_old activations that need to be matched for mappint. Ignored
+    if only_power is True.
 
     only_power: bool
     Only consider the power consumption of the appliance (i.e., not
@@ -328,13 +333,16 @@ def appliance_mapping(a_new, a_old, t=50.0, tol=5, only_power=False):
                     p_new, p_old = _activations_overlap_pct(a_new[k],
                                                             a_old[l],
                                                             tol=tol)
-                    # Minus for the sorting afterwards
-                    candidates.append((d, -p_old, l))
+                    if p_old > p_t:
+                        # Minus for the sorting afterwards
+                        candidates.append((d, -p_old, l))
                 else:
                     candidates.append((d, 0.0, l))
         if candidates:
             candidates.sort()
-            # Simplistic: Just get the best match overall
+            # Simplistic: Just get the best match overall. In this case, two
+            # different k may match to the same appliance!
+            # For now, this behavior is controlled through the thresholds
             mapping[k] = candidates[0][2]
     return mapping
 
