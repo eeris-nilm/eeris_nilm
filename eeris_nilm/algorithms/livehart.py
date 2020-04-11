@@ -1031,5 +1031,5 @@ class LiveHart(object):
 
         if td.total_seconds() / 3600.0 >= self.CLUSTER_STEP_HOURS:
             self.force_clustering(method=self.CLUSTERING_METHOD,
-                                  start_thread=False)
+                                  start_thread=True)
         time.sleep(0.01)

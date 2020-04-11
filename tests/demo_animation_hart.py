@@ -224,10 +224,12 @@ d = Demo(p, date_start, date_end, ax, axt, dataset=dataset, step=step,
 ani = animation.FuncAnimation(fig, d, frames=d.data_gen,
                               init_func=d.init, interval=50,
                               fargs=None, blit=False, repeat=False,
-                              save_count=10000000)
-                              #save_count=sys.maxsize)
+                              save_count=sys.maxsize)
 if save:
+    plt.rcParams['animation.ffmpeg_path'] = '/usr/bin/ffmpeg'
+    writer = animation.FFMpegWriter(fps=15, codec='hevc')
     ani.save(save_file,
-             progress_callback=lambda i, n: print(f'Saving frame {i} of {n}'))
+             progress_callback=lambda i, n: print(f'Saving frame {i} of {n}'),
+             writer=writer)
 else:
     plt.show()
