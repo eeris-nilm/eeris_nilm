@@ -182,7 +182,10 @@ else:
 
 
 # Edit these to fit your setup.
-step = 20
+step = 7
+save = True
+save_file = 'demo_videos/' + dataset + \
+    str(datetime.datetime.now().date()) + '.mp4'
 inst_id = None
 if dataset == 'redd':
     p = 'tests/data/house_1'
@@ -207,7 +210,7 @@ elif dataset == 'eeris':
     p = ('tests/data/eeRIS/snapshot_07042020/124B0011EEE909/124B0002CC3CCD'
          '/124B0011EEE909_124B0002CC3CCD_')
     date_start = '2019-12-01T05:00'
-    date_end = '2019-12-15T00:00'
+    date_end = '2019-12-10T23:59'
     inst_id = '5e05d5c83e442d4f78db036f'
     model_path_r = 'tests/data/model_eeris.dill'
     model_path_w = 'tests/data/model_eeris.dill'
@@ -221,5 +224,10 @@ d = Demo(p, date_start, date_end, ax, axt, dataset=dataset, step=step,
 ani = animation.FuncAnimation(fig, d, frames=d.data_gen,
                               init_func=d.init, interval=50,
                               fargs=None, blit=False, repeat=False,
-                              save_count=sys.maxsize)
-plt.show()
+                              save_count=10000000)
+                              #save_count=sys.maxsize)
+if save:
+    ani.save(save_file,
+             progress_callback=lambda i, n: print(f'Saving frame {i} of {n}'))
+else:
+    plt.show()

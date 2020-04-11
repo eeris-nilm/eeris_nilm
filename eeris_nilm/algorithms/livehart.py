@@ -144,8 +144,8 @@ class LiveHart(object):
         self._steady_start_ts = None
         self._steady_end_ts = None
         # For online edge detection
-        self.online_edge_detected = False
-        self.online_edge = np.array([0.0, 0.0])
+        self._online_edge_detected = False
+        self._online_edge = np.array([0.0, 0.0])
 
         # List of live appliances
         self.live = []
@@ -250,8 +250,8 @@ class LiveHart(object):
         self._edge_count = 0
         self._previous_steady_power = np.array([0.0, 0.0])
         self.running_avg_power = np.array([0.0, 0.0])
-        self.online_edge_detected = False
-        self.online_edge = np.array([0.0, 0.0])
+        self._online_edge_detected = False
+        self._online_edge = np.array([0.0, 0.0])
         self.live = []
 
     def _detect_edges_hart(self):
@@ -259,8 +259,8 @@ class LiveHart(object):
         Edge detector, based on Hart's algorithm.
         """
         self._edge_detected = False
-        self.online_edge_detected = False
-        self.online_edge = np.array([0.0, 0.0])
+        self._online_edge_detected = False
+        self._online_edge = np.array([0.0, 0.0])
         if self.last_processed_ts is None:
             data = self._buffer[['active', 'reactive']].values
             prev = data[0, :]
@@ -334,9 +334,9 @@ class LiveHart(object):
                         self._edge_end_ts = current_ts
                         self._steady_start_ts = current_ts
                         self.on_transition = False
-                        self.online_edge_detected = True
-                        # self.online_edge = self.running_edge_estimate
-                        self.online_edge = self.running_avg_power - \
+                        self._online_edge_detected = True
+                        # self._online_edge = self.running_edge_estimate
+                        self._online_edge = self.running_avg_power - \
                             self._previous_steady_power
                         self._edge_count = 0
             self._samples_count += 1
@@ -679,7 +679,7 @@ class LiveHart(object):
         display of eeRIS. Note that this works only in 'online' mode (small
         batches of samples at a time).
         """
-        if not self.online_edge_detected:
+        if not self._online_edge_detected:
             # No edge was detected
             if not self.live:
                 return
@@ -695,7 +695,7 @@ class LiveHart(object):
                 # Update signature
                 self.live[0].signature = p.reshape(-1, 1).T
             return
-        e = self.online_edge
+        e = self._online_edge
         if all(np.fabs(e) < self.SIGNIFICANT_EDGE):
             # Although no edge is added, previous should be finalised
             if self.live:
@@ -723,11 +723,10 @@ class LiveHart(object):
                 self.live.insert(0, candidates[0][0])
                 # 2x because we take both the rising and dropping edge
                 n = 2 * self.live[0].activations.shape[0]
-                if n > 0:
-                    s = self.live[0].signature[0, :]
-                    s_a = a.signature[0, :]
-                    avg_power = n/(n + 1.0) * s + 1.0 / (n + 1.0) * s_a
-                    self.live[0].signature[0, :] = avg_power
+                s = self.live[0].signature[0, :]
+                s_a = a.signature[0, :]
+                avg_power = n / (n + 1.0) * s + 1.0 / (n + 1.0) * s_a
+                self.live[0].signature[0, :] = avg_power
             # For activations
             self.live[0].start_ts = self._edge_start_ts
             # Done
@@ -746,7 +745,7 @@ class LiveHart(object):
                 # As in Hart's edge matching. This could be edge_end_ts
                 end_ts = self._edge_start_ts
                 # Update running average, take into account matching edge
-                n = 2 * self.live[i].activations.shape[0]
+                n = 2 * self.live[i].activations.shape[0] + 1
                 new_e = n / (n + 1.0) * e0 + (1 / (n + 1.0)) * (-e)
                 self.live[i].signature[0] = new_e
                 active = self.live[i].signature[0][0]
@@ -829,28 +828,24 @@ class LiveHart(object):
     def _update_live(self):
         """
         Provide information for display at the eeRIS "live" screen. Preliminary
-        version.
+        version - assumes transition was at step/2 (just for display)
         """
-        # prev = self._est_prev
+        # TODO: Fix with transition at actual times
+        prev = self._previous_steady_power[0]
         step = self._data.shape[0]
         # Update yest
-        if self.online_edge_detected and not self.on_transition:
-            prev = self._previous_steady_power[0]
+        if self._online_edge_detected and not self.on_transition:
             y1 = np.array([prev] * (step // 2))
-            y2 = np.array([prev + self.online_edge[0]] * (step - step // 2))
+            y2 = np.array([prev + self._online_edge[0]] * (step - step // 2))
             self._yest = np.concatenate([self._yest, y1, y2])
-            # self._est_prev = self._previous_steady_power[0]
-            # prev = self._est_prev
         elif self.on_transition:
             self._yest = np.concatenate(
-                [self._yest, np.array([self._previous_steady_power[0]] * step)]
+                [self._yest, np.array([prev] * step)]
             )
         else:
             self._yest = np.concatenate(
                 [self._yest, np.array([self.running_avg_power[0]] * step)]
             )
-            # self._est_prev = self.running_avg_power[0]
-            # prev = self._est_prev
         if self._yest.shape[0] > self.MAX_DISPLAY_SECONDS:
             self._yest = self._yest[-self.MAX_DISPLAY_SECONDS:]
         # Update ymatch.

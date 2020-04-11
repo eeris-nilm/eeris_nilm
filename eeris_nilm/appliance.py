@@ -470,6 +470,8 @@ class Appliance(object):
             self.final = True
         # Running average. TODO: Introduce checks for highly abnormal new value?
         if self.p_signature is not None:
+            # TODO: Check if this is necessary, given the code updates in
+            # livehart.
             self.signature = 0.9 * self.p_signature + 0.1 * self.signature
         self.p_signature = self.signature
 
