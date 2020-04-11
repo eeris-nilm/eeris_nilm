@@ -372,6 +372,34 @@ class LiveHart(object):
 
         # TODO: Allow many live appliances to map to the same cluster. Also,
         # consider copying active appliances to the live set after all.
+        a = self.appliances.copy()
+        for k in self.appliances_live.keys():
+            if k in mapping.keys():
+                m = mapping[k]
+                a[m].live = True
+                a[m].start_ts = self.appliances_live[k].start_ts
+                # In case the appliance is operating, replace with new live.
+                try:
+                    idx = self.live.index(self.appliances_live[k])
+                    self.live[idx] = a[m]
+                except ValueError:
+                    continue
+            else:
+                # Non-mapped appliances remain the same, so self.live shouldn't
+                # be affected.
+                a[k] = self.appliances_live[k]
+        self.appliances_live = a
+
+    def _sync_appliances_live_1_DEPRECATED(self, mapping):
+        """
+        Map the live appliances to the ones detected by clustering (some design
+        choices made here).
+        """
+        # TODO: This function is more complicated than it needs to be because
+        # different options need to be tested for the matching.
+
+        # TODO: Allow many live appliances to map to the same cluster. Also,
+        # consider copying active appliances to the live set after all.
         a = dict()
         mapped_keys = []
         a_new = self.appliances
@@ -691,8 +719,15 @@ class LiveHart(object):
                 # Increase display id for next appliance
                 self._appliance_display_id += 1
             else:
-                # Match with previous
+                # Match with previous and update signature with average
                 self.live.insert(0, candidates[0][0])
+                # 2x because we take both the rising and dropping edge
+                n = 2 * self.live[0].activations.shape[0]
+                if n > 0:
+                    s = self.live[0].signature[0, :]
+                    s_a = a.signature[0, :]
+                    avg_power = n/(n + 1.0) * s + 1.0 / (n + 1.0) * s_a
+                    self.live[0].signature[0, :] = avg_power
             # For activations
             self.live[0].start_ts = self._edge_start_ts
             # Done
@@ -710,8 +745,14 @@ class LiveHart(object):
                 start_ts = self.live[i].start_ts
                 # As in Hart's edge matching. This could be edge_end_ts
                 end_ts = self._edge_start_ts
+                # Update running average, take into account matching edge
+                n = 2 * self.live[i].activations.shape[0]
+                new_e = n / (n + 1.0) * e0 + (1 / (n + 1.0)) * (-e)
+                self.live[i].signature[0] = new_e
                 active = self.live[i].signature[0][0]
+                # Update activations
                 self.live[i].append_activation(start_ts, end_ts, active)
+                # Remove appliance from live
                 self.live.pop(i)
                 matched = True
                 break

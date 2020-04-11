@@ -35,7 +35,7 @@ from eeris_nilm.algorithms import livehart
 
 class Demo(object):
     # Change this to "zoom-in/zoom-out" in the graph
-    TIME_WINDOW = 5*3600
+    TIME_WINDOW = 2*3600
     # How often should the model be saved?
     MODEL_SAVE_STEP = 100
 
@@ -206,7 +206,7 @@ elif dataset == 'cenote':
 elif dataset == 'eeris':
     p = ('tests/data/eeRIS/snapshot_07042020/124B0011EEE909/124B0002CC3CCD'
          '/124B0011EEE909_124B0002CC3CCD_')
-    date_start = '2019-12-01T00:00'
+    date_start = '2019-12-01T05:00'
     date_end = '2019-12-15T00:00'
     inst_id = '5e05d5c83e442d4f78db036f'
     model_path_r = 'tests/data/model_eeris.dill'
