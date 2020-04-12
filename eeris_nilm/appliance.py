@@ -62,7 +62,10 @@ def compare_power(a1, a2, t):
                 continue
             p1 = a1.signature[i, :]
             p2 = a2.signature[j, :]
-            match, d = utils.match_power(p1, p2, active_only=False)
+            try:
+                match, d = utils.match_power(p1, p2, active_only=False)
+            except ValueError:
+                continue
             if d < distance:
                 best_match = j
             if match:
@@ -106,9 +109,12 @@ def match_power_state(a1, a2, t=None, lp=None, m=None):
     distance = 1e10
     index = -1
     for i in range(s2.shape[0]):
-        match, d = utils.match_power(s1[0, :], s2[i, :],
-                                     active_only=False,
-                                     t=t, lp=lp, m=m)
+        try:
+            match, d = utils.match_power(s1[0, :], s2[i, :],
+                                         active_only=False,
+                                         t=t, lp=lp, m=m)
+        except ValueError:
+            continue
         if d < distance:
             distance = d
             index = i
@@ -167,9 +173,12 @@ def match_appliances_power(a_from, a_to, t=35.0, copy_activations=True):
             # Works only for two-state appliances. Remember that
             # signature[0] is a 1x2 vector with active and reactive power
             # (1st appliance state)
-            match, d = utils.match_power(a_from[k].signature[0],
-                                         a_to[l].signature[0],
-                                         active_only=False, t=t)
+            try:
+                match, d = utils.match_power(a_from[k].signature[0],
+                                             a_to[l].signature[0],
+                                             active_only=False, t=t)
+            except ValueError:
+                continue
             if match:
                 candidates.append((l, d))
         if candidates:
@@ -325,9 +334,12 @@ def appliance_mapping(a_new, a_old, t=50.0, tol=5, p_t=0.2, only_power=False):
             # Works only for two-state appliances. Remember that
             # signature[0] is a 1x2 vector with active and reactive power
             # (1st appliance state)
-            match, d = utils.match_power(a_new[k].signature[0],
-                                         a_old[l].signature[0],
-                                         active_only=False, t=t)
+            try:
+                match, d = utils.match_power(a_new[k].signature[0],
+                                             a_old[l].signature[0],
+                                             active_only=False, t=t)
+            except ValueError:
+                continue
             if match:
                 if not only_power:
                     p_new, p_old = _activations_overlap_pct(a_new[k],

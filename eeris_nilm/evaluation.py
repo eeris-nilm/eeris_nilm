@@ -335,10 +335,13 @@ def hart_evaluation(data, labels, mode='edges', step=None):
     for g_k, g in gt_appliances.items():
         mapping_g[g] = []
         for a_k, a in model.appliances.items():
-            match, d, index = \
-                appliance.Appliance.match_power_state(a, g, t=35.0,
-                                                      lp=350,
-                                                      m=0.1)
+            try:
+                match, d, index = \
+                    appliance.Appliance.match_power_state(a, g, t=35.0,
+                                                          lp=350,
+                                                          m=0.1)
+            except ValueError:
+                continue
             if match and d < distance[a]:
                 # Strict evaluation: Each detected appliance matches exactly one
                 # ground truth appliance

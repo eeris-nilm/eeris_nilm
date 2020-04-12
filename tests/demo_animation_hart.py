@@ -18,7 +18,7 @@ limitations under the License.
 import sys
 import dill
 import datetime
-import logging
+# import logging
 import pandas as pd
 
 import matplotlib.pyplot as plt
@@ -174,7 +174,8 @@ class Demo(object):
             self.line_match
 
 
-logging.basicConfig(level=logging.DEBUG)
+# If enabled the saving hangs
+# logging.basicConfig(level=logging.DEBUG)
 if len(sys.argv) == 1:
     dataset = 'redd'
 else:
@@ -226,10 +227,7 @@ ani = animation.FuncAnimation(fig, d, frames=d.data_gen,
                               fargs=None, blit=False, repeat=False,
                               save_count=sys.maxsize)
 if save:
-    plt.rcParams['animation.ffmpeg_path'] = '/usr/bin/ffmpeg'
-    writer = animation.FFMpegWriter(fps=15, codec='hevc')
     ani.save(save_file,
-             progress_callback=lambda i, n: print(f'Saving frame {i} of {n}'),
-             writer=writer)
+             progress_callback=lambda i, n: print(f'Saving frame {i} of {n}'))
 else:
     plt.show()

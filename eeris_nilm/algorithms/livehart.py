@@ -118,8 +118,9 @@ class LiveHart(object):
         # Helper variable, index of first unprocessed sample in burffer
         self._idx = None
         # Helper variables for visualization (edges, matched devices)
-        # TODO: Do we need these at all?
         self._yest = np.array([], dtype='float64')
+        self._last_visualized_ts = None
+        self._online_edge_ts = None
         self._ymatch = None
         self._ymatch_live = None
         # Installation id (is this necessary?)
@@ -338,11 +339,14 @@ class LiveHart(object):
                         # self._online_edge = self.running_edge_estimate
                         self._online_edge = self.running_avg_power - \
                             self._previous_steady_power
+                        self._online_edge_ts = self._edge_start_ts
+                        # self._online_edge_ts = self._edge_end_ts
                         self._edge_count = 0
             self._samples_count += 1
         # Update lists
         self._edges = pd.concat(edge_list, ignore_index=True)
-        self._steady_states = pd.concat(steady_list, ignore_index=True)
+        self._steady_states = pd.concat(steady_list, ignore_index=True,
+                                        sort=True)
         # Update last processed
         self.last_processed_ts = self._buffer.index[-1]
 
@@ -652,8 +656,11 @@ class LiveHart(object):
                 e1 = e.iloc[i][['active', 'reactive']].values.astype(np.float64)
                 e2 = \
                     -e.iloc[j][['active', 'reactive']].values.astype(np.float64)
-                match, d = utils.match_power(e1, e2, active_only=True,
-                                             t=self.MATCH_THRESHOLD)
+                try:
+                    match, d = utils.match_power(e1, e2, active_only=True,
+                                                 t=self.MATCH_THRESHOLD)
+                except ValueError:
+                    continue
                 if match:
                     # Match (e2 = -e.iloc[j], so it has the "correct" sign)
                     edge = (e1 + e2) / 2.0
@@ -737,8 +744,12 @@ class LiveHart(object):
         for i in range(len(self.live)):
             # e0 = self.live[i].signature.reshape(-1, 1).T
             e0 = self.live[i].signature[0]
-            match, d = utils.match_power(e0, -e, active_only=True,
-                                         t=self.MATCH_THRESHOLD)
+            try:
+                match, d = utils.match_power(e0, -e, active_only=True,
+                                             t=self.MATCH_THRESHOLD)
+            except ValueError:
+                match = False
+                continue
             if match:
                 # Store live activations as well.
                 start_ts = self.live[i].start_ts
@@ -796,10 +807,14 @@ class LiveHart(object):
             if self.appliances_live[k] in self.live:
                 continue
             # Assumes two-state appliances.
-            # TODO: Use Appliance.compare_power() in the future.
-            match, d = utils.match_power(self.appliances_live[k].signature[0],
-                                         a.signature[0], active_only=False,
-                                         t=self.MATCH_THRESHOLD)
+            # TODO: Use Appliance.compare_power() in the future. (?)
+            try:
+                match, d = \
+                    utils.match_power(self.appliances_live[k].signature[0],
+                                      a.signature[0], active_only=False,
+                                      t=self.MATCH_THRESHOLD)
+            except ValueError:
+                continue
             # We want to only consider appliances that are not already
             # on.
             if match and (self.appliances_live[k] not in self.live):
@@ -827,16 +842,21 @@ class LiveHart(object):
 
     def _update_live(self):
         """
-        Provide information for display at the eeRIS "live" screen. Preliminary
-        version - assumes transition was at step/2 (just for display)
+        Provide information for display at the eeRIS "live" screen.
         """
         # TODO: Fix with transition at actual times
         prev = self._previous_steady_power[0]
-        step = self._data.shape[0]
+        if self._last_visualized_ts is not None:
+            step = (self.last_processed_ts - self._data.index[0]).seconds
+        else:
+            step = (self.last_processed_ts - self._last_visualized_ts).seconds
         # Update yest
         if self._online_edge_detected and not self.on_transition:
-            y1 = np.array([prev] * (step // 2))
-            y2 = np.array([prev + self._online_edge[0]] * (step - step // 2))
+            step1 = (self._online_edge_ts - self._last_visualized_ts).seconds
+            step2 = \
+                (self.last_processed_ts - self.last_visualized_ts).seconds + 1
+            y1 = np.array([prev] * step1)
+            y2 = np.array([prev + self._online_edge[0]] * step2)
             self._yest = np.concatenate([self._yest, y1, y2])
         elif self.on_transition:
             self._yest = np.concatenate(
@@ -857,6 +877,7 @@ class LiveHart(object):
         [self._match_helper(x, y, z)
          for x, y, z in
          zip(matches['start'], matches['end'], matches['active'])]
+        self._last_visualized_ts = self.last_processed_ts
 
     def _sanity_checks(self):
         # TODO: Need to activate only in case of edges. Checks need to go back
