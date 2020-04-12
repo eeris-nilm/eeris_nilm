@@ -510,7 +510,7 @@ class LiveHart(object):
             bandwidth = 2 * self.MATCH_THRESHOLD
             centers, labels = sklearn.cluster.mean_shift(matches,
                                                          bandwidth=bandwidth,
-                                                         cluster_all=False)
+                                                         cluster_all=True)
             u_labels = np.unique(labels[labels >= 0])
         else:
             raise ValueError(("Unrecognized clustering method %s. Possible "
@@ -661,6 +661,8 @@ class LiveHart(object):
                                                  t=self.MATCH_THRESHOLD)
                 except ValueError:
                     continue
+                # TODO: Either here or at the sanity checks: For dst > 1 or > 2,
+                # introduce a sanity check that ymatch is not higher than y
                 if match:
                     # Match (e2 = -e.iloc[j], so it has the "correct" sign)
                     edge = (e1 + e2) / 2.0
@@ -670,6 +672,11 @@ class LiveHart(object):
                                        'end': e.iloc[j]['start'],
                                        'active': edge[0],
                                        'reactive': edge[1]}, index=[0])
+                    # Sanity check
+                    sanity = self._match_sanity_check(df)
+                    if not sanity:
+                        continue
+
                     self._matches = self._matches.append(df, ignore_index=True,
                                                          sort=False)
                     # Mark the edge as matched
@@ -679,6 +686,15 @@ class LiveHart(object):
                     continue
         # Perform sanity checks and clean buffers.
         self._clean_buffers()
+
+    def _match_sanity_check(match):
+        """
+        Update the estimated consumption and make sure that a match does not
+        lead to an impossible situation where _ymatch (the estimated
+        consumption) is significantly higher than the actual consumption.
+        """
+        # TODO: NOT IMPLEMENTED
+        return True
 
     def _match_edges_live(self):
         """
@@ -840,21 +856,31 @@ class LiveHart(object):
             start_sec_vis = self.MAX_DISPLAY_SECONDS
         self._ymatch[-start_sec_vis:-end_sec_vis] += active
 
-    def _update_live(self):
+    def _update_display(self):
         """
         Provide information for display at the eeRIS "live" screen.
         """
         # TODO: Fix with transition at actual times
         prev = self._previous_steady_power[0]
-        if self._last_visualized_ts is not None:
-            step = (self.last_processed_ts - self._data.index[0]).seconds
+        if self.last_processed_ts is not None:
+            if self._last_visualized_ts is not None:
+                step = (self.last_processed_ts -
+                        self._last_visualized_ts).seconds
+            else:
+                step = (self.last_processed_ts -
+                        self._data.index[0]).seconds + 1
         else:
-            step = (self.last_processed_ts - self._last_visualized_ts).seconds
+            step = self._data.shape[0]
+
         # Update yest
         if self._online_edge_detected and not self.on_transition:
-            step1 = (self._online_edge_ts - self._last_visualized_ts).seconds
-            step2 = \
-                (self.last_processed_ts - self.last_visualized_ts).seconds + 1
+            if (self._online_edge_ts > self._last_visualized_ts):
+                step1 = (self._online_edge_ts -
+                         self._last_visualized_ts).seconds
+            else:
+                step1 = (self._last_visualized_ts -
+                         self._online_edge_ts).seconds
+            step2 = step - step1
             y1 = np.array([prev] * step1)
             y2 = np.array([prev + self._online_edge[0]] * step2)
             self._yest = np.concatenate([self._yest, y1, y2])
@@ -869,6 +895,7 @@ class LiveHart(object):
         if self._yest.shape[0] > self.MAX_DISPLAY_SECONDS:
             self._yest = self._yest[-self.MAX_DISPLAY_SECONDS:]
         # Update ymatch.
+        # TODO: ymatch will be a sanity check tool, will be removed from here.
         cutoff_ts = self.last_processed_ts - \
             pd.offsets.Second(self.MAX_DISPLAY_SECONDS)
         # To avoid unnecessary checks in _match_helper()
@@ -1031,8 +1058,8 @@ class LiveHart(object):
         # Sanity checks
         self._sanity_checks()
 
-        # Live update
-        self._update_live()
+        # Live display update (for demo/debugging purposes)
+        self._update_display()
 
         # TODO: Fix bugs in sanity checks
         self._match_edges_live()
