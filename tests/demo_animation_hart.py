@@ -128,10 +128,10 @@ class Demo(object):
         self.ydata.extend(y['active'].values.tolist())
         lim = min(len(self.xdata), self.time_window)
         self.line_active.set_data(self.xdata[-lim:], self.ydata[-lim:])
-        self.line_est.set_data(self.xdata[-lim:],
-                               self.model._yest.tolist()[-lim:])
-        self.line_match.set_data(self.xdata[-lim:],
-                                 self.model._ymatch.tolist()[-lim:])
+        ydisp = self.model._yest[-lim:].tolist()
+        self.line_est.set_data(self.xdata[-lim:], ydisp)
+        ymatchdisp = self.model._ymatch['active'].values[-lim:].tolist()
+        self.line_match.set_data(self.xdata[-lim:], ymatchdisp)
         # Update axis limits
         xmin, xmax = self.ax.get_xlim()
         xmin = max(0, t + self.step - self.time_window)
@@ -184,8 +184,8 @@ else:
 
 # Edit these to fit your setup.
 step = 7
-save = True
-# save = False
+# save = True
+save = False
 inst_id = None
 if dataset == 'redd':
     p = 'tests/data/house_1'
@@ -210,7 +210,7 @@ elif dataset == 'eeris':
     p = ('tests/data/eeRIS/snapshot_07042020/124B0011EEE909/124B0002CC3CCD'
          '/124B0011EEE909_124B0002CC3CCD_')
     date_start = '2019-12-05T00:00'
-    date_end = '2019-12-16T23:59'
+    date_end = '2019-12-05T23:59'
     inst_id = '5e05d5c83e442d4f78db036f'
     model_path_r = 'tests/data/model_eeris.dill'
     model_path_w = 'tests/data/model_eeris.dill'

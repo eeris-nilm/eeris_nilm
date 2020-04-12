@@ -240,6 +240,21 @@ class LiveHart(object):
         # TODO: Handle N/As and zero voltage.
         # TODO: Unit tests with all the unusual cases
 
+        # Update match buffer
+        if self._ymatch is None:
+            self._ymatch = pd.DataFrame(np.zeros([self._buffer.shape[0], 2]),
+                                        index=self._buffer.index,
+                                        columns=['active', 'reactive'])
+        else:
+            d = pd.DataFrame(np.zeros([self._data.shape[0], 2]),
+                             index=self._data.index,
+                             columns=['active', 'reactive'])
+            self._ymatch = self._ymatch.append(d, sort=True)
+            if not self.batch_mode:
+                start_ts = self._ymatch.index[-1] - \
+                    pd.offsets.Second(self.MAX_MATCH_THRESHOLD_DAYS*3600*24 - 1)
+                self._ymatch = self._ymatch.loc[self._ymatch.index >= start_ts]
+
     def _reset(self):
         """
         Reset model parameters. Can be useful after a big gap in the data
@@ -371,11 +386,6 @@ class LiveHart(object):
         Map the live appliances to the ones detected by clustering (some design
         choices made here).
         """
-        # TODO: This function is more complicated than it needs to be because
-        # different options need to be tested for the matching.
-
-        # TODO: Allow many live appliances to map to the same cluster. Also,
-        # consider copying active appliances to the live set after all.
         a = self.appliances.copy()
         for k in self.appliances_live.keys():
             if k in mapping.keys():
@@ -392,6 +402,15 @@ class LiveHart(object):
                 # Non-mapped appliances remain the same, so self.live shouldn't
                 # be affected.
                 a[k] = self.appliances_live[k]
+        self.appliances_live = a
+
+    def _sync_appliances_live_copy(self):
+        """
+        The live appliances are just a copy of the clustered appliances.
+        """
+        a = self.appliances.copy()
+        for k in a.keys():
+            a[k].live = True
         self.appliances_live = a
 
     def _sync_appliances_live_1_DEPRECATED(self, mapping):
@@ -554,10 +573,14 @@ class LiveHart(object):
             mapping = appliance.appliance_mapping(appliances, self.appliances)
             self._sync_appliances(appliances, mapping)
         # Sync live appliances.
-        mapping = appliance.appliance_mapping(self.appliances_live,
-                                              self.appliances,
-                                              t=2*self.MATCH_THRESHOLD)
-        self._sync_appliances_live(mapping)
+        # Option 1: Just copy the clusters.
+        self._sync_appliances_live_copy()
+
+        # Option 2: Map and sync.
+        # mapping = appliance.appliance_mapping(self.appliances_live,
+        #                                       self.appliances,
+        #                                       t=2*self.MATCH_THRESHOLD)
+        # self._sync_appliances_live(mapping)
         # Set timestamp
         self._last_clustering_ts = self._buffer.index[-1]
 
@@ -680,21 +703,36 @@ class LiveHart(object):
                     self._matches = self._matches.append(df, ignore_index=True,
                                                          sort=False)
                     # Mark the edge as matched
-                    c = e.columns.get_loc('mark')  # Crazy pandas indexing...
+                    c = e.columns.get_loc('mark')  # Pandas indexing...
                     e.iat[i, c] = True
                     e.iat[j, c] = True
                     continue
         # Perform sanity checks and clean buffers.
         self._clean_buffers()
 
-    def _match_sanity_check(match):
+    def _match_sanity_check(self, match):
         """
         Update the estimated consumption and make sure that a match does not
         lead to an impossible situation where _ymatch (the estimated
         consumption) is significantly higher than the actual consumption.
         """
-        # TODO: NOT IMPLEMENTED
-        return True
+        # Update ymatch.
+        start = (self._ymatch.index[-1] - match.iloc[0]['start']).seconds
+        end = (self._ymatch.index[-1] - match.iloc[0]['end']).seconds
+        active = match.iloc[0]['active']
+        self._ymatch['active'][-start:-end] += active
+        # Hardcoded parameters. Can be more strict.
+        check_threshold = max([0.2 * active, 100.0])
+        diff = self._ymatch[-start:-end]['active'].values - \
+            self._buffer[-start:-end]['active'].values
+        check = np.sum(diff > check_threshold)
+        if check > 30:
+            self._ymatch['active'][-start:-end] -= active
+            return False
+        else:
+            reactive = match.iloc[0]['reactive']
+            self._ymatch['reactive'][-start:-end] += reactive
+            return True
 
     def _match_edges_live(self):
         """
@@ -848,6 +886,7 @@ class LiveHart(object):
         Helper function to update the "explained" power consumption _ymatch
         based on a pair of matched edges. For debugging/demonstration purposes.
         """
+        # TODO: DEPRECATED. To be removed in future versions
         end_sec_vis = (self.last_processed_ts - end).seconds
         if end_sec_vis > self.MAX_DISPLAY_SECONDS:
             return
@@ -894,17 +933,17 @@ class LiveHart(object):
             )
         if self._yest.shape[0] > self.MAX_DISPLAY_SECONDS:
             self._yest = self._yest[-self.MAX_DISPLAY_SECONDS:]
-        # Update ymatch.
-        # TODO: ymatch will be a sanity check tool, will be removed from here.
-        cutoff_ts = self.last_processed_ts - \
-            pd.offsets.Second(self.MAX_DISPLAY_SECONDS)
-        # To avoid unnecessary checks in _match_helper()
-        matches = self._matches[self._matches['end'] > cutoff_ts]
-        self._ymatch = np.zeros_like(self._yest)
-        [self._match_helper(x, y, z)
-         for x, y, z in
-         zip(matches['start'], matches['end'], matches['active'])]
         self._last_visualized_ts = self.last_processed_ts
+        # Update ymatch (for visualization).
+        # TODO: Remove comments when finalized
+        # cutoff_ts = self.last_processed_ts - \
+        #     pd.offsets.Second(self.MAX_DISPLAY_SECONDS)
+        # # To avoid unnecessary checks in _match_helper()
+        # matches = self._matches[self._matches['end'] > cutoff_ts]
+        # self._ymatch = np.zeros_like(self._yest)
+        # [self._match_helper(x, y, z)
+        #  for x, y, z in
+        #  zip(matches['start'], matches['end'], matches['active'])]
 
     def _sanity_checks(self):
         # TODO: Need to activate only in case of edges. Checks need to go back
