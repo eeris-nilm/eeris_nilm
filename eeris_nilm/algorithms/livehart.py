@@ -913,12 +913,16 @@ class LiveHart(object):
 
         # Update yest
         if self._online_edge_detected and not self.on_transition:
-            if (self._online_edge_ts > self._last_visualized_ts):
-                step1 = (self._online_edge_ts -
-                         self._last_visualized_ts).seconds
+            if self._last_visualized_ts is not None:
+                if (self._online_edge_ts > self._last_visualized_ts):
+                    step1 = (self._online_edge_ts -
+                             self._last_visualized_ts).seconds
+                else:
+                    step1 = (self._last_visualized_ts -
+                             self._online_edge_ts).seconds
             else:
-                step1 = (self._last_visualized_ts -
-                         self._online_edge_ts).seconds
+                # Should not occur normally
+                step1 = 1
             step2 = step - step1
             y1 = np.array([prev] * step1)
             y2 = np.array([prev + self._online_edge[0]] * step2)
