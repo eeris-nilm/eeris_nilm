@@ -1086,7 +1086,7 @@ class LiveHart(object):
         """
         # For thread safety
         if not self._lock.acquire(timeout=120):
-            logging.debug("Lock acquire timeout!")
+            logging.debug("update(): Lock acquire timeout!")
             return
         if data is not None:
             self.data = data

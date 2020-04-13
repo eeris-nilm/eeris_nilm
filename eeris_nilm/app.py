@@ -16,6 +16,7 @@ limitations under the License.
 
 import sys
 import falcon
+import logging
 # from falcon_auth import FalconAuthMiddleware, JWTAuthBackend
 import pymongo
 import eeris_nilm.nilm
@@ -67,6 +68,7 @@ def create_app(dburl, dbname, act_url=None, recomp_url=None,
     # auth_middleware = FalconAuthMiddleware(auth_backend)
 
     # DB connection
+    logging.debug("Connecting to database")
     mclient = pymongo.MongoClient(dburl)
     dblist = mclient.list_database_names()
     if dbname in dblist:
@@ -83,6 +85,8 @@ def create_app(dburl, dbname, act_url=None, recomp_url=None,
     orchestrator_url = 'http://83.212.104.172:8000/'
     act_url = orchestrator_url + 'historical/events/'
     comp_url = orchestrator_url + 'historical/'
+
+    logging.debug("Setting up connections")
     nilm = eeris_nilm.nilm.NILM(mdb, thread=thread, act_url=act_url,
                                 comp_url=comp_url)
     api.add_route('/nilm/{inst_id}', nilm)
@@ -97,6 +101,7 @@ def create_app(dburl, dbname, act_url=None, recomp_url=None,
     api.add_route('/installation/{inst_id}/model',
                   eeris_nilm.installation.InstallationManager(mdb),
                   suffix='model')
+    logging.debug("Ready")
     return api
 
 
