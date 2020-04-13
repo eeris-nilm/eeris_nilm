@@ -284,6 +284,9 @@ class NILM(object):
                                             "exist")
             else:
                 self._models[inst_id] = dill.loads(inst_doc['modelHart'])
+                # Make sure threading lock is released
+                if self._models[inst_id]._lock.locked():
+                    self._models[inst_id]._lock.release()
                 self._model_lock_id[inst_id] = self._model_lock_num
                 self._model_lock_num += 1
                 self._recomputation_active[inst_id] = False
@@ -358,6 +361,8 @@ class NILM(object):
                     'modelHart': modelstr}
         self._mdb.models.insert_one(inst_doc)
         self._models[inst_id] = dill.loads(inst_doc['modelHart'])
+        if self._models[inst_id]._lock.locked():
+            self._models[inst_doc]._lock.release()
         self._put_count[inst_id] = 0
         model = self._models[inst_id]
         url = self._computations_url + inst_id
@@ -448,6 +453,8 @@ class NILM(object):
                             'modelHart': modelstr}
                 self._mdb.models.insert_one(inst_doc)
             self._models[inst_id] = dill.loads(inst_doc['modelHart'])
+            if self._models[inst_id]._lock.locked():
+                self._models[inst_id]._lock.release()
             self._model_lock_id[inst_id] = self._model_lock_num
             self._model_lock_num += 1
             self._recomputation_active[inst_id] = False

@@ -63,7 +63,7 @@ class LiveHart(object):
     MAX_MATCH_THRESHOLD_DAYS = 2
     EDGES_CLEAN_HOURS = 6
     STEADY_CLEAN_DAYS = 15
-    MATCHES_CLEAN_DAYS = 3 * 365   # Unused for now
+    MATCHES_CLEAN_DAYS = 365   # Unused for now
     OVERESTIMATION_SECONDS = 10
 
     # For clustering
@@ -507,6 +507,7 @@ class LiveHart(object):
             matches = matches.loc[matches['start'] > start_ts]
         matches1 = matches.copy()
         matches = matches[['active', 'reactive']].values
+        clustering_start_ts = self.last_processed_ts
         self._lock.release()
         debug_t_start = datetime.datetime.now()
         logging.debug('Initiating static clustering at %s' % debug_t_start)
@@ -582,7 +583,7 @@ class LiveHart(object):
         #                                       t=2*self.MATCH_THRESHOLD)
         # self._sync_appliances_live(mapping)
         # Set timestamp
-        self._last_clustering_ts = self._buffer.index[-1]
+        self._last_clustering_ts = clustering_start_ts
 
         logging.debug('Clustering complete. Current list of appliances:')
         logging.debug(str(self.appliances))
