@@ -114,7 +114,7 @@ class Demo(object):
         return (self.line_active, self.line_est)
 
     def data_gen(self):
-        self.power = self.power.loc[self.power.index > self.start_ts]
+        self.power = self.power.loc[self.power.index > self.start_ts].dropna()
         end = self.power.shape[0] - self.power.shape[0] % self.step
         for i in range(0, end, self.step):
             data = self.power.iloc[i:i+self.step]
@@ -124,7 +124,8 @@ class Demo(object):
         t, y = data
         self.model.update(y)
         # Update lines
-        self.xdata.extend(list(range(t, t + self.step)))
+        duration = (y.index[-1] - y.index[0]).seconds
+        self.xdata.extend(list(range(t, t + duration)))
         self.ydata.extend(y['active'].values.tolist())
         lim = min(len(self.xdata), self.time_window)
         self.line_active.set_data(self.xdata[-lim:], self.ydata[-lim:])
@@ -134,7 +135,7 @@ class Demo(object):
         self.line_match.set_data(self.xdata[-lim:], ymatchdisp)
         # Update axis limits
         xmin, xmax = self.ax.get_xlim()
-        xmin = max(0, t + self.step - self.time_window)
+        xmin = max(0, t + self.step - self.time_window + 1)
         xmax = max(self.time_window, t + self.step)
         ymin = min(self.ydata[-self.time_window:] + [0])  # List concatenation
         ymax = max(self.ydata[-self.time_window:] + [0])  # List concatenation
@@ -183,7 +184,7 @@ else:
 
 
 # Edit these to fit your setup.
-step = 7
+step = 5
 save = True
 # save = False
 inst_id = None
@@ -209,8 +210,8 @@ elif dataset == 'cenote':
 elif dataset == 'eeris':
     p = ('tests/data/eeRIS/snapshot_07042020/124B0011EEE909/124B0002CC3CCD'
          '/124B0011EEE909_124B0002CC3CCD_')
-    date_start = '2019-12-01T05:00'
-    date_end = '2019-12-15T23:59'
+    date_start = '2020-03-01T00:00'
+    date_end = '2020-03-31T23:59'
     inst_id = '5e05d5c83e442d4f78db036f'
     model_path_r = 'tests/data/model_eeris.dill'
     model_path_w = 'tests/data/model_eeris.dill'

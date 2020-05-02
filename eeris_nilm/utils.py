@@ -85,17 +85,18 @@ def get_normalized_data(data, nominal_voltage):
     """
     if 'active' not in data.columns:
         raise ValueError("No \'active\' column.")
-
-    r_data = data.copy()
+    # First, copy the df and make sure there are no NAs
+    r_data = data.dropna()
 
     # Normalization. Raise active power to 1.5 and reactive power to
-    # 2.5. See Hart's 1985 paper for an explanation.
+    # 2.5. See Hart's 1985 paper for an explanation. 1mV is added to avoid
+    # division by zero
     if 'voltage' in data.columns:
         r_data.loc[:, 'active'] = data['active'] * \
-            np.power((nominal_voltage / data['voltage']), 1.5)
+            np.power((nominal_voltage / (data['voltage'] + 0.001)), 1.5)
         if 'reactive' in data.columns:
             r_data.loc[:, 'reactive'] = data['reactive'] * \
-                np.power((nominal_voltage / data['voltage']), 2.5)
+                np.power((nominal_voltage / (data['voltage'] + 0.001)), 2.5)
     return r_data
 
 
@@ -115,6 +116,8 @@ def preprocess_data(data):
     """
     # Make sure timestamps are in correct order
     out = data.sort_index()
+    # Make sure there are no NAs
+    out = out.dropna()
     # Round timestamps to 1s
     out.index = out.index.round('1s')
     out = out.reset_index()

@@ -190,8 +190,7 @@ class LiveHart(object):
         if duration > self.MAX_WINDOW_DAYS:
             # Do not process the window, it's too long.
             raise ValueError('Data duration too long')
-        # Store the original data
-        self._data_orig = data
+        self._data_orig = data.dropna()
 
     def _preprocess(self):
         """
@@ -199,7 +198,6 @@ class LiveHart(object):
         BUFFER_SIZE_SECONDS of data. Current version resamples to 1Hz sampling
         frequency.
         """
-        # TODO: What about NAs? Apply dropna?
         if self._buffer is None:
             # Buffer initialization
             self._buffer = \
@@ -575,13 +573,13 @@ class LiveHart(object):
             self._sync_appliances(appliances, mapping)
         # Sync live appliances.
         # Option 1: Just copy the clusters.
-        self._sync_appliances_live_copy()
+        # self._sync_appliances_live_copy()
 
         # Option 2: Map and sync.
-        # mapping = appliance.appliance_mapping(self.appliances_live,
-        #                                       self.appliances,
-        #                                       t=2*self.MATCH_THRESHOLD)
-        # self._sync_appliances_live(mapping)
+        mapping = appliance.appliance_mapping(self.appliances_live,
+                                              self.appliances,
+                                              t=2*self.MATCH_THRESHOLD)
+        self._sync_appliances_live(mapping)
         # Set timestamp
         self._last_clustering_ts = clustering_start_ts
 
@@ -834,7 +832,7 @@ class LiveHart(object):
         for app in self.live:
             app.update_appliance_live()
 
-    def _match_appliances_live(self, a, t=35.0):
+    def _match_appliances_live(self, a, t=50.0):
         """
         Helper function to match an online detected appliance against a list of
         appliances.
