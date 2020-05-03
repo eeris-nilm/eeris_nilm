@@ -213,6 +213,9 @@ class LiveHart(object):
                 sort=True)
         # Data pre-processing (remove duplicates, resample to 1s)
         self._buffer = utils.preprocess_data(self._buffer)
+        # Make sure that data is left in the buffer (can happen during startup)
+        if self._buffer.empty:
+            return
         # Keep only the last BUFFER_SIZE_SECONDS of the buffer, if batch mode is
         # disabled. Should this be done before preprocesssing?
         if not self.batch_mode:
