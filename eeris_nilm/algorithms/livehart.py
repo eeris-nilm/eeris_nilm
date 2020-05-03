@@ -1099,7 +1099,7 @@ class LiveHart(object):
         self._preprocess()
 
         # Make sure data still exists
-        if self._buffer.emtpy:
+        if self._buffer.empty:
             return
 
         # Edge detection
