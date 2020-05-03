@@ -1097,6 +1097,11 @@ class LiveHart(object):
             return
         # Preprocessing: Resampling, normalization, missing values, etc.
         self._preprocess()
+
+        # Make sure data still exists
+        if self._buffer.emtpy:
+            return
+
         # Edge detection
         self._detect_edges_hart()
         # Edge matching
