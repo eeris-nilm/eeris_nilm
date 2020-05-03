@@ -1089,6 +1089,9 @@ class LiveHart(object):
             return
         if data is not None:
             self.data = data
+        else:
+            # If data is empty, do nothing
+            return
         # Preprocessing: Resampling, normalization, missing values, etc.
         self._preprocess()
         # Edge detection
