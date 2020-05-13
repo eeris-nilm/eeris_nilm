@@ -23,7 +23,8 @@ def date_parser(x):
     return datetime.datetime.fromtimestamp(float(x))
 
 
-def read_redd(path, date_start=None, date_end=None, get_channels=True):
+def read_redd(path, date_start=None, date_end=None,
+              get_channels=True, mark_na=True):
     """Parse REDD data files.
 
     Parameters
@@ -35,6 +36,10 @@ def read_redd(path, date_start=None, date_end=None, get_channels=True):
     (%Y-%m-%dT%H:%M). For example '2011-04-18T17:00'.
 
     date_end : String. Same as above, for the end date.
+
+    mark_na : bool
+    If true, then values for mains are resampled with filled NAs for missing
+    samples.
 
     Returns
     -------
@@ -64,6 +69,15 @@ def read_redd(path, date_start=None, date_end=None, get_channels=True):
         data[ch] = pd.read_csv(filepath, header=None, index_col=0, sep=' ',
                                names=['active'], parse_dates=True,
                                date_parser=date_parser)
+        if mark_na:
+            tmp = data[ch].sort_index()
+            tmp.index.round('1s')
+            tmp = tmp.reset_index()
+            tmp = tmp.drop_duplicates(subset='index', keep='last')
+            tmp = tmp.set_index('index')
+            tmp = tmp.asfreq('1S')
+            data[ch] = tmp
+
     # Create an extra dataframe with the sum of the two mains measurements in
     # the house. Channels 1 and 2 are always the 'mains' channels.
     data['mains'] = data[1]
@@ -71,6 +85,15 @@ def read_redd(path, date_start=None, date_end=None, get_channels=True):
     # Insert fake reactive power and voltage columns.
     data['mains'].insert(1, 'reactive', 0.0)
     data['mains'].insert(1, 'voltage', 230.0)
+
+    if mark_na:
+        tmp = data['mains'].sort_index()
+        tmp.index.round('1s')
+        tmp = tmp.reset_index()
+        tmp = tmp.drop_duplicates(subset='index', keep='last')
+        tmp = tmp.set_index('index')
+        tmp = tmp.asfreq('1S')
+        data['mains'] = tmp
 
     # Filter by date
     if date_start is not None:
@@ -85,6 +108,7 @@ def read_redd(path, date_start=None, date_end=None, get_channels=True):
     for k in data.keys():
         data[k] = data[k].loc[(data[k].index >= d_start) &
                               (data[k].index < d_end)]
+
     if get_channels:
         return (data, labels)
     else:

@@ -77,7 +77,7 @@ class LiveHart(object):
     BACKGROUND_UPDATE_PERIOD_HOURS = 1
 
     def __init__(self, installation_id, nominal_voltage=230.0,
-                 batch_mode=False):
+                 batch_mode=False, store_live=False):
         # Almost all variables are needed as class members, to support streaming
         # support.
 
@@ -157,6 +157,10 @@ class LiveHart(object):
         # Dictionaries of known appliances
         self.appliances = {}
         self.appliances_live = {}
+        # Store a record of all live events for evaluation purposes
+        self._store_live = store_live
+        self.live_history = pd.DataFrame([], columns=['start', 'end', 'name',
+                                                      'active', 'reactive'])
 
         # Other variables - needed for sanity checks
         self.background_active = self.LARGE_POWER
@@ -269,6 +273,11 @@ class LiveHart(object):
         self.running_avg_power = np.array([0.0, 0.0])
         self._online_edge_detected = False
         self._online_edge = np.array([0.0, 0.0])
+        for a in self.live:
+            start_ts = a.start_ts
+            end_ts = self.last_processed_ts
+            active = a.signature[0][0]
+            a.append_activation(start_ts, end_ts, active)
         self.live = []
 
     def _detect_edges_hart(self):
@@ -499,8 +508,12 @@ class LiveHart(object):
         # Select matched edges to use for clustering
         matches = self._matches.copy()
         matches = matches[['start', 'end', 'active', 'reactive']]
+        clustering_start_ts = self.last_processed_ts
         if len(matches) < self.MIN_EDGES_STATIC_CLUSTERING:
             self._lock.release()
+            # Set the timestamp, to avoid continuous attempts for clustering
+            # Set timestamp
+            self._last_clustering_ts = clustering_start_ts
             return
         if not self.batch_mode:
             start_ts = matches['start'].iloc[-1] - \
@@ -508,7 +521,6 @@ class LiveHart(object):
             matches = matches.loc[matches['start'] > start_ts]
         matches1 = matches.copy()
         matches = matches[['active', 'reactive']].values
-        clustering_start_ts = self.last_processed_ts
         self._lock.release()
         debug_t_start = datetime.datetime.now()
         logging.debug('Initiating static clustering at %s' % debug_t_start)
@@ -719,8 +731,10 @@ class LiveHart(object):
         consumption) is significantly higher than the actual consumption.
         """
         # Update ymatch.
-        start = (self._ymatch.index[-1] - match.iloc[0]['start']).seconds
-        end = (self._ymatch.index[-1] - match.iloc[0]['end']).seconds
+        tds = self._ymatch.index[-1] - match.iloc[0]['start']
+        start = tds.days * 3600 * 24 + tds.seconds
+        tde = self._ymatch.index[-1] - match.iloc[0]['end']
+        end = tde.days * 3600 * 24 + tde.seconds
         active = match.iloc[0]['active']
         self._ymatch['active'][-start:-end] += active
         # Hardcoded parameters. Can be more strict.
@@ -818,9 +832,23 @@ class LiveHart(object):
                 active = self.live[i].signature[0][0]
                 # Update activations
                 self.live[i].append_activation(start_ts, end_ts, active)
+                matched = True
+                if self._store_live:
+                    # If we want to store detected live events for evaluation
+                    # and debugging purposes.
+                    tmp_df = pd.DataFrame(data={'start': start_ts,
+                                                'end': end_ts,
+                                                'name': self.live[i].name,
+                                                'active':
+                                                self.live[i].signature[0][0],
+                                                'reactive':
+                                                self.live[i].signature[0][1]},
+                                          index=[0])
+                    self.live_history = \
+                        self.live_history.append(tmp_df, ignore_index=True,
+                                                 sort=True)
                 # Remove appliance from live
                 self.live.pop(i)
-                matched = True
                 break
         if not matched:
             # If we reached this point, then the negative edge did not match
@@ -889,6 +917,8 @@ class LiveHart(object):
         based on a pair of matched edges. For debugging/demonstration purposes.
         """
         # TODO: DEPRECATED. To be removed in future versions
+        # TODO: Code below won't work if time difference exceeds 1 day
+        # (.seconds)
         end_sec_vis = (self.last_processed_ts - end).seconds
         if end_sec_vis > self.MAX_DISPLAY_SECONDS:
             return
@@ -901,15 +931,15 @@ class LiveHart(object):
         """
         Provide information for display at the eeRIS "live" screen.
         """
-        # TODO: Fix with transition at actual times
         prev = self._previous_steady_power[0]
         if self.last_processed_ts is not None:
             if self._last_visualized_ts is not None:
-                step = (self.last_processed_ts -
-                        self._last_visualized_ts).seconds
+                td = (self.last_processed_ts - self._last_visualized_ts)
+                # Days should always be zero, but just in case
+                step = td.days * 3600 * 24 + td.seconds + 1
             else:
-                step = (self.last_processed_ts -
-                        self._data.index[0]).seconds + 1
+                td = (self.last_processed_ts - self._data.index[0])
+                step = td.days * 3600 * 24 + td.seconds + 1
         else:
             step = self._data.shape[0]
 
@@ -917,11 +947,11 @@ class LiveHart(object):
         if self._online_edge_detected and not self.on_transition:
             if self._last_visualized_ts is not None:
                 if (self._online_edge_ts > self._last_visualized_ts):
-                    step1 = (self._online_edge_ts -
-                             self._last_visualized_ts).seconds
+                    td = (self._online_edge_ts - self._last_visualized_ts)
+                    step1 = td.days * 3600 * 24 + td.seconds + 1
                 else:
-                    step1 = (self._last_visualized_ts -
-                             self._online_edge_ts).seconds
+                    td = (self._last_visualized_ts - self._online_edge_ts)
+                    step1 = td.days * 3600 * 24 + td.seconds + 1
             else:
                 # Should not occur normally
                 step1 = 1
@@ -940,16 +970,6 @@ class LiveHart(object):
         if self._yest.shape[0] > self.MAX_DISPLAY_SECONDS:
             self._yest = self._yest[-self.MAX_DISPLAY_SECONDS:]
         self._last_visualized_ts = self.last_processed_ts
-        # Update ymatch (for visualization).
-        # TODO: Remove comments when finalized
-        # cutoff_ts = self.last_processed_ts - \
-        #     pd.offsets.Second(self.MAX_DISPLAY_SECONDS)
-        # # To avoid unnecessary checks in _match_helper()
-        # matches = self._matches[self._matches['end'] > cutoff_ts]
-        # self._ymatch = np.zeros_like(self._yest)
-        # [self._match_helper(x, y, z)
-        #  for x, y, z in
-        #  zip(matches['start'], matches['end'], matches['active'])]
 
     def _sanity_checks(self):
         # TODO: Need to activate only in case of edges. Checks need to go back
@@ -978,7 +998,7 @@ class LiveHart(object):
         for a in self.live:
             total_estimated += a.signature[0]
         total_estimated += self.background_active
-        # Allow for 10% error in edge estimation
+        # Allow for 20% error
         if self.running_avg_power[0] < 0.8 * total_estimated[0]:
             # We may have made a matching error, and an appliance should have
             # been switched off. Heuristic solution here.
@@ -1081,10 +1101,19 @@ class LiveHart(object):
         else:
             return False
 
-    def update(self, data=None):
+    def update(self, data=None, start_thread=True):
         """
-        Wrapper to sequence of operations for model update. Normally, this the
-        only function anyone will need to call to use the model.
+        Wrapper to sequence of operations for model update.
+
+        Parameters
+        ----------
+
+        data : pandas.DataFrame
+        pandas dataframe with timestamp index and measurements including
+        'active', 'reactive', 'voltage'
+
+        start_thread : bool
+        Threaded version, where a separate clustering thread is started
         """
         # For thread safety
         if not self._lock.acquire(timeout=120):
@@ -1132,5 +1161,5 @@ class LiveHart(object):
 
         if td.total_seconds() / 3600.0 >= self.CLUSTER_STEP_HOURS:
             self.force_clustering(method=self.CLUSTERING_METHOD,
-                                  start_thread=True)
+                                  start_thread=start_thread)
         time.sleep(0.01)

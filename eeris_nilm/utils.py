@@ -15,6 +15,7 @@ limitations under the License.
 """
 
 import numpy as np
+import scipy
 import pandas as pd
 import json
 import requests
@@ -40,29 +41,36 @@ def get_segments(signal, mask, only_true=True):
 
     Returns
     -------
-    out : list
+    segments : list
     List of numpy.array elements, each containing a segment of the original
     signal.
-
+    events : list
+    List with (start, stop) pairs indicating the start and end sample for each
+    segment
     """
     if signal.shape[0] != mask.shape[0]:
         raise ValueError("Signal and mask shape do not match")
 
     # Vectorized way to identify semgments. Not straightforward, but fast.
     segments = []
+    events = []
     idx = np.where(np.concatenate(([True], mask[:-1] != mask[1:], [True])))[0]
     for i in range(len(idx[:-1])):
         seg = signal[idx[i]:idx[i + 1]]
         segments.append(seg)
+        events.append((idx[i], idx[i + 1]))
 
     if only_true:
         if mask[0]:
             ret_segments = segments[::2]
+            ret_events = events[::2]
         else:
             ret_segments = segments[1::2]
+            ret_events = events[1::2]
     else:
         ret_segments = segments
-    return ret_segments
+        ret_events = events
+    return ret_segments, ret_events
 
 
 def get_normalized_data(data, nominal_voltage):
@@ -254,6 +262,74 @@ def power_curve_from_activations(appliances, start=None, end=None):
         for _, act in appliances[i].activations.iterrows():
             power.loc[act['start']:act['end']] += s
     return power
+
+
+def activations_from_power_curve(data, states=False, threshold=35):
+    """
+    Create a pandas dataframe of appliance activations from a single appliance's
+    power consumption curve (only active power is considered). This function can
+    take into account multiple appliance states (i.e., when an appliance changes
+    its state, it can lead to a different activation or not).
+
+    Parameters
+    ----------
+
+    data : pandas.Dataframe
+    Pandas dataframe with a column 'active'. Other columns, if present, are
+    ignored.
+
+    states : bool
+    Whether to take states into account or not.
+
+    threshold: float
+    Threshold value for detecting activations
+
+    Returns
+    -------
+
+    activations : pandas.DataFrame
+    Dataframe with columns 'start', 'end', 'active'. When states is False, the
+    column active is always zero.
+
+    """
+    if 'active' not in data.columns:
+        s = ("Expect \'active\' and, optionally,",
+             "\'reactive\' and \'voltage\' columns")
+        raise ValueError(s)
+
+    data_n = data['active']
+    # Pre-process data to a constant sampling rate, and fill-in missing
+    # data.
+    data_n = preprocess_data(data_n)
+    start_ts = data_n.index[0]
+    # Work with numpy data from now on.
+    npdata = data_n.values[:, 0]
+    if states:
+        # Apply a 5-th order derivative filter to detect edges
+        sobel = np.array([-2, -1, 0, 1, 2])
+        # Apply an edge threshold
+        edge = np.fabs(scipy.convolve(npdata, sobel, mode='same'))
+        mask = (edge < threshold) & (npdata > threshold)
+        segments, events = get_segments(npdata, mask)
+        # Get the start and end timestamp for each event
+    else:
+        # Hardcoded threshold
+        mask = npdata > threshold
+        segments, events = get_segments(npdata, mask)
+    seg_events = np.array([[start_ts + pd.Timedelta(event[0], unit='seconds'),
+                            start_ts + pd.Timedelta(event[1], unit='seconds')]
+                           for event in events])
+    df_list = []
+    for i in range(seg_events.shape[0]):
+        df = pd.DataFrame({'start': seg_events[i, 0],
+                           'end': seg_events[i, 1],
+                           'active': np.mean(segments[i])}, index=[0])
+        df_list.append(df)
+    if len(df_list) > 0:
+        activations = pd.concat(df_list)
+    else:
+        activations = None
+    return activations
 
 
 def remove_overlapping_matches(matches):

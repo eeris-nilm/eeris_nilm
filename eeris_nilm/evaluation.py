@@ -17,6 +17,7 @@ limitations under the License.
 import numpy as np
 import os.path
 import logging
+import dill
 from sklearn import metrics
 from eeris_nilm import appliance
 from eeris_nilm.datasets import redd
@@ -401,3 +402,358 @@ def hart_evaluation(data, labels, mode='edges', step=None):
     # precision
     # recall
     # roc
+
+
+def consistency(h, n=15):
+    """
+    TODO
+    """
+    # TODO: Option to infer n?
+    entropy = -np.sum(np.array([h[i]*np.log2(h[i]) for i in h.keys()]))
+    entropy_max = -np.sum(np.array([1/n*np.log2(1/n) for i in range(n)]))
+    c = 1.0 - (entropy / entropy_max)
+    return c
+
+
+def live_run(mains, step=3):
+    """
+    Run the live algorithma and create a live model.
+    """
+    # Train main model with step-second batches
+    model = livehart.LiveHart(installation_id=1, batch_mode=False,
+                              store_live=True)
+    report_step = 3600 // step
+    end = mains.shape[0] - mains.shape[0] % step
+    for i in range(0, end, step):
+        if i % report_step == 0:
+            logging.debug("Processing at second %d" % (i))
+        y = mains.iloc[i:i+step]
+        model.update(y, start_thread=False)
+    return model
+
+
+def _live_metrics(appliance_h, live_h, data, tol=15):
+    """
+    Auxiliary function to compute appliance activation matches between live
+    display and ground truth
+    """
+    # Prepare matches
+    match_df = appliance_h.sort_values(by=['start'], ignore_index=True)
+    match_df_s = appliance_h.sort_values(by=['start'], ignore_index=True)
+    l_df = live_h.sort_values(by=['start'], ignore_index=True)
+    match_df['matches'] = np.empty((match_df.shape[0], 0)).tolist()
+    match_df_s['matches'] = np.empty((match_df_s.shape[0], 0)).tolist()
+    hist = dict()
+    hist_s = dict()
+    hist['NA'] = 0
+    hist_s['NA'] = 0
+    hist_dur = dict()
+    hist_dur['NA'] = 0
+    # This code repeats the _activations_overlap_pct funcrtion in
+    # appliance.py. Is there an efficient  way to refactor?
+    idx1 = 0
+    idx2 = 0
+    dur1_tot = 0
+    dur_match_tot = 0
+    events_tot = 0
+    while idx1 < match_df.shape[0]:
+        start1 = match_df.iloc[idx1]['start']
+        end1 = match_df.iloc[idx1]['end']
+        dur1 = (end1 - start1).days * 24 * 3600 + (end1 - start1).seconds
+        # Ignore very small events
+        if dur1 < tol:
+            idx1 += 1
+            continue
+        # Perhaps there are missing data in this segment in the 'mains'
+        # recording?
+        seg = data.loc[start1:end1]
+        if seg['active'].isnull().sum().sum() > 2:
+            # Ignore this
+            idx1 += 1
+            continue
+        dur1_tot += dur1
+        events_tot += 1
+        dur2_match = 0
+        while idx2 < live_h.shape[0]:
+            start2 = l_df.iloc[idx2]['start']
+            end2 = l_df.iloc[idx2]['end']
+            dur2 = (end2 - start2).days * 24 * 3600 + (end2 - start2).seconds
+
+            start_d = (start2 - start1).days * 24 * 3600 + \
+                (start2 - start1).seconds
+            end_d = (end2 - end1).days * 24 * 3600 + \
+                (end2 - end1).seconds
+
+            if start_d < -tol:
+                idx2 += 1
+                continue
+            if abs(start_d) <= tol:
+                # Match start
+                name = l_df.iloc[idx2]['name']
+                match_df_s.iloc[idx1]['matches'].append(name)
+                if abs(end_d) <= tol:
+                    # Match both start and end
+                    match_df.iloc[idx1]['matches'].append(name)
+                    # duration only for full match
+                    dur2_match += dur2
+                idx2 += 1
+                continue
+            if start_d > tol:
+                break
+            idx2 += 1
+        ml = match_df.iloc[idx1]['matches']
+        mls = match_df_s.iloc[idx1]['matches']
+        if len(ml) > 0:
+            if len(ml) > 1:
+                # Just for warning
+                logging.debug("More than one matches for %d: %s" %
+                              (idx1, str(ml)))
+            if ml[0] in hist.keys():
+                hist[ml[0]] += 1
+            else:
+                hist[ml[0]] = 1
+            if ml[0] in hist_dur.keys():
+                hist_dur[ml[0]] += dur2_match
+            else:
+                hist_dur[ml[0]] = dur2_match
+            dur_match_tot += dur2_match
+        else:
+            hist['NA'] += 1
+            hist_dur['NA'] += dur1
+        if len(mls) > 0:
+            if len(mls) > 1:
+                # Just for warning
+                logging.debug("More than one matches for %d: %s" %
+                              (idx1, str(mls)))
+            if mls[0] in hist_s.keys():
+                hist_s[mls[0]] += 1
+            else:
+                hist_s[mls[0]] = 1
+        else:
+            hist_s['NA'] += 1
+        idx1 += 1
+    # Compute metrics
+    # Number and percentage of unmatched activations
+    if events_tot > 0:
+        matched_p = 1 - (hist['NA'] / events_tot)
+        matched_p_s = 1 - (hist_s['NA'] / events_tot)
+    else:
+        logging.debug("Zero events for evaluation")
+        matched_p = None
+        matched_p_s = None
+    if dur1_tot > 0:
+        # Due to the tolerance, if there's a perfect match then it is possible
+        # that matched_dur_tot > dur1_tot.
+        if dur_match_tot > dur1_tot:
+            dur_match_tot = dur1_tot
+        matched_dur_p = dur_match_tot / dur1_tot
+    else:
+        logging.debug("Zero duration for evaluation")
+        matched_dur_p = None
+    tot = 0
+    hist_n = dict()
+    for k in hist.keys():
+        if k == 'NA':
+            continue
+        else:
+            hist_n[k] = hist[k]
+            tot += hist[k]
+    for k in hist_n.keys():
+        hist_n[k] /= tot
+
+    tot_s = 0
+    hist_s_n = dict()
+    for k in hist_s.keys():
+        if k == 'NA':
+            continue
+        else:
+            hist_s_n[k] = hist_s[k]
+            tot_s += hist_s[k]
+    for k in hist_s_n.keys():
+        hist_s_n[k] /= tot_s
+
+    metrics = dict()
+    metrics['n'] = events_tot
+    metrics['d'] = dur1_tot
+    metrics['h'] = hist
+    metrics['h_n'] = hist_n
+    metrics['h_s'] = hist_s
+    metrics['h_s_n'] = hist_s_n
+    metrics['pm'] = matched_p
+    metrics['ps'] = matched_p_s
+    metrics['pd'] = matched_dur_p
+    metrics['c'] = consistency(hist_n)
+    metrics['c_s'] = consistency(hist_s_n)
+    return metrics
+
+
+def live_evaluation(data, labels, step=3, states=True, history_file=None):
+    """
+    Evaluate performance of Live algorithm.
+
+    Parameters
+    ----------
+
+    data: Dictionary of pandas.DataFrame objects
+    One data['mains'] object is expected, corresponding to the installation
+    meter. Additional objects correspond to meters of individual appliances and
+    are used as ground truth (except those that have a label 'mains', see
+    below).
+
+    labels: pandas.Dataframe
+    A dataframe with a 'label' column, indicating the appliance category
+    corresponding to each of the dataframes in the 'data' dictionary. The
+    dataframes with label 'mains' are not used for evaluation.
+
+    mode : str, can be 'edges' or 'steady_states'
+    Method to compute the ground truth power states. In 'edges' mode (the
+    default), edges and Hart's algorithm are used to determine the transitions
+    of the appliance. In 'steady_states' method, the detected steady states of
+    the appliance are used instead
+
+    step : int
+    Process the data in batches of 'step' seconds at a time. If None, then the
+    entire dataset is loaded into memory. WARNING: No memory checks are
+    performed, so please make sure that the dataset can fit into memory.
+
+    history_file : str or None
+    If not None, then all previous variables are ignored and all activation data
+    are loaded from the file (a dill.dump() of LiveHart.live_history variable).
+
+    Returns
+    -------
+
+    TODO: update
+
+
+    hist_gt : dict
+    Dictionary with ground truth appliance names as keys. Each dictionary
+    element is also a dictionary with the live appliance names as keys, as well
+    as the extra key 'NA'. Each element of the dictionary is the number of times
+    each live appliance was assigned to the ground truth appliance. Thus
+    hist[gt_appliance][live_appliance] is the number of times live_appliance
+    matched an activation of gt_appliance.
+
+    matched_p_gt: dict
+    Dictionary with ground truth appliance names as keys. Each element is the
+    percentage of activations that was matched by live appliances.
+
+    matched_dur_p_gt: dict
+    Same as matched_p_gt, but the value is the percentage of the total appliance
+    activation duration that was matched by live appliances
+    """
+    # Get activations of appliances
+    logging.debug("Computing indivudal appliance activations")
+    gt_activations = dict()
+    for i in labels.index:
+        # For each appliance
+        category = labels.loc[i, 'label']
+        if category == 'mains':
+            continue
+        name = category + '_' + str(i)
+        # TODO: Hardcoded threshold
+        activations = utils.activations_from_power_curve(data[i],
+                                                         states=states,
+                                                         threshold=35)
+        gt_activations[name] = activations
+
+    # Get the model including the live detections
+    logging.debug("Computing the model")
+    if history_file is None:
+        model = live_run(data['mains'], step=step)
+        lh = model.live_history
+    else:
+        with open(history_file, 'rb') as f:
+            lh = dill.load(f)
+    # Compute metrics
+    metrics = dict()
+    for name in gt_activations.keys():
+        a = gt_activations[name]
+        if a is None:
+            continue
+        metrics[name] = _live_metrics(a, lh, data['mains'], tol=15)
+    return metrics
+
+
+def live_redd_evaluation(redd_path, house='house_1',
+                         date_start=None,
+                         date_end=None,
+                         step=3, history_file=None):
+    """Evaluate performance of implementation of Live algorithm to the REDD
+    dataset.
+
+    Parameters
+    ----------
+
+    redd_path : str
+    Path to the REDD dataset
+
+    house : str
+    REDD house name
+
+    date_start : str
+    Start date. If earlier than the earliest date, the start time of the data
+    is used.
+
+    date_end : str
+    End date. If later than the latest date, the end time of the data
+    is used.
+
+    step : int
+    Process the data in batches of 'step' seconds at a time. Default is 3. This
+    value should be less than 10 (ideally in the 1-3 range), for the evaluation
+    to be meaningful.
+
+    history_file : str or None
+    If not None, then all previous variables are ignored and all activation data
+    are loaded from the file (a dill.dump() of LiveHart.live_history variable).
+
+    Returns
+    -------
+
+    TODO: update
+
+    hist_gt : dict
+    Dictionary with ground truth appliance names as keys. Each dictionary
+    element is also a dictionary with the live appliance names as keys, as well
+    as the extra key 'NA'. Each element of the dictionary is the number of times
+    each live appliance was assigned to the ground truth appliance. Thus
+    hist[gt_appliance][live_appliance] is the number of times live_appliance
+    matched an activation of gt_appliance.
+
+    matched_p_gt: dict
+    Dictionary with ground truth appliance names as keys. Each element is the
+    percentage of activations that was matched by live appliances.
+
+    matched_dur_p_gt: dict
+    Same as matched_p_gt, but the value is the percentage of the total appliance
+    activation duration that was matched by live appliances
+
+    """
+    path = os.path.join(redd_path, house)
+    data, labels = redd.read_redd(path, date_start=date_start,
+                                  date_end=date_end)
+    metrics = live_evaluation(data, labels, step, states=False,
+                              history_file=history_file)
+    return metrics
+    # TODO: Evaluation by appliance consumption
+
+
+def live_evaluation_print(metrics):
+    """
+    TODO
+    """
+    for name in metrics.keys():
+        print("------------------------")
+        print("Results for %s" % (name))
+        print("Histogram - non normalized")
+        print(metrics[name]['h'])
+        if metrics[name]['pm'] is not None:
+            print("Matched percentage: %f" % (metrics[name]['pm']))
+            if metrics[name]['pd'] is not None:
+                print("Matched duration percentage: %f" %
+                      (metrics[name]['pd']))
+        print("Histogram - normalized (excluding NAs)")
+        print(metrics[name]['h_n'])
+        print("Consistency")
+        print(metrics[name]['c'])

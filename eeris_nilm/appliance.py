@@ -247,9 +247,9 @@ def _activations_overlap_pct(a1, a2, tol=5, n_limit=500):
 
     """
     # Make sure activations are sorted by their start time (in POSIX ts)
-    df1 = a1.activations.sort_values(by=['start'])
+    df1 = a1.activations.sort_values(by=['start'], ignore_index=True)
     v1 = df1[['start', 'end']].values.astype('datetime64[s]').astype('int64')
-    df2 = a2.activations.sort_values(by=['start'])
+    df2 = a2.activations.sort_values(by=['start'], ignore_index=True)
     v2 = df2[['start', 'end']].values.astype('datetime64[s]').astype('int64')
     if n_limit is not None:
         v1 = v1[-n_limit:, :]
@@ -351,7 +351,10 @@ def appliance_mapping(a_new, a_old, t=50.0, tol=5, p_t=0.2, only_power=False):
                 else:
                     candidates.append((d, 0.0, l))
         if candidates:
-            candidates.sort()
+            if not only_power:
+                candidates.sort(key=lambda x: x[1])
+            else:
+                candidates.sort(key=lambda x: x[0])
             # Simplistic: Just get the best match overall. In this case, two
             # different k may match to the same appliance!
             # For now, this behavior is controlled through the thresholds
@@ -529,8 +532,10 @@ class Appliance(object):
         # Apply a 5-th order derivative filter to detect edges
         sobel = np.array([-2, -1, 0, 1, 2])
         # Apply an edge threshold
-        threshold = 5.0  # TODO: Make this a parameter
-        mask = scipy.convolve(npdata[:, 0], sobel, mode='same') < threshold
+        threshold = 15.0  # TODO: Make this a parameter
+        # Identify steady state segments
+        mask = np.fabs(scipy.convolve(npdata[:, 0], sobel, mode='same')) \
+            < threshold
         segments = utils.get_segments(npdata, mask)
         # Get the average value of each segment
         seg_values = np.array([np.mean(seg) for seg in segments])

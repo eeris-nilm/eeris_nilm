@@ -16,6 +16,7 @@ limitations under the License.
 
 # Demo of edge detection without REST service implementation
 import sys
+import os
 import dill
 import datetime
 # import logging
@@ -46,7 +47,8 @@ class Demo(object):
 
         # Load data
         if dataset == 'redd':
-            self.data, self.labels = redd.read_redd(path, date_start, date_end,
+            self.data, self.labels = redd.read_redd(path, date_start=date_start,
+                                                    date_end=date_end,
                                                     get_channels=False)
             self.power = self.data['mains']
         elif dataset == 'eco':
@@ -81,7 +83,7 @@ class Demo(object):
             else:
                 new_model = False  # Not needed, for emphasis/readability
         if new_model:
-            self.model = livehart.LiveHart(installation_id=1)
+            self.model = livehart.LiveHart(installation_id=1, store_live=True)
             self.start_ts = pd.Timestamp(date_start)
             self.start_sec = 0
         self.model_path_w = model_path_w
@@ -124,7 +126,7 @@ class Demo(object):
         t, y = data
         self.model.update(y)
         # Update lines
-        duration = (y.index[-1] - y.index[0]).seconds
+        duration = (y.index[-1] - y.index[0]).seconds + 1
         self.xdata.extend(list(range(t, t + duration)))
         self.ydata.extend(y['active'].values.tolist())
         lim = min(len(self.xdata), self.time_window)
@@ -184,16 +186,17 @@ else:
 
 
 # Edit these to fit your setup.
-step = 5
+step = 3
 save = True
 # save = False
 inst_id = None
 if dataset == 'redd':
     p = 'tests/data/house_1'
+    house = os.path.basename(p)
     date_start = '2011-04-18T01:00'
     date_end = '2011-04-30T23:59'
-    model_path_r = 'tests/data/model_redd.dill'
-    model_path_w = 'tests/data/model_redd.dill'
+    model_path_r = 'tests/data/model_redd_' + house + '.dill'
+    model_path_w = 'tests/data/model_redd_' + house + '.dill'
 elif dataset == 'eco':
     p = 'tests/data/01_sm_csv/01'
     date_start = '2012-06-10T20:55'
