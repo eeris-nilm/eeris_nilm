@@ -22,6 +22,7 @@ import json
 import logging
 import time
 import datetime
+import uwsgi  # Experiment with uwsgi locks. Can we replace with threading?
 import threading
 import atexit
 import requests
@@ -73,7 +74,8 @@ class NILM(object):
         self._put_count = dict()
         self._prev = 0.0
         self._response = response
-        self._model_lock = dict()
+        self._model_lock_id = dict()
+        self._model_lock_num = 1
         self._recomputation_active = dict()
         self._recomputation_thread = None
         self._thread = None
@@ -98,9 +100,10 @@ class NILM(object):
         """
         ret = {}
         for inst_id, model in self._models.items():
-            if inst_id not in self._model_lock.keys():
-                self._model_lock[inst_id] = threading.Lock()
-            self._model_lock[inst_id].acquire(timeout=60)
+            if inst_id not in self._model_lock_id.keys():
+                self._model_lock_id[inst_id] = self._model_lock_num
+                self._model_lock_num += 1
+            uwsgi.lock(self._model_lock_id[inst_id])
             payload = []
             for a_k, a in model.appliances:
                 # For now, do not mark activations as sent (we'll do that only
@@ -144,7 +147,7 @@ class NILM(object):
                 ret[inst_id] = \
                     json.dumps(a.return_new_activations(update_ts=True))
             # Move on to the next installation
-            self._model_lock[inst_id].release()
+            uwsgi.unlock(self._model_lock_id[inst_id])
         return ret
 
     def _cancel_thread(self):
@@ -284,7 +287,7 @@ class NILM(object):
                 # Make sure threading lock is released
                 if self._models[inst_id]._lock.locked():
                     self._models[inst_id]._lock.release()
-                self._model_lock[inst_id] = self._model_lock_num
+                self._model_lock_id[inst_id] = self._model_lock_num
                 self._model_lock_num += 1
                 self._recomputation_active[inst_id] = False
         return self._models[inst_id]
@@ -335,9 +338,10 @@ class NILM(object):
             logging.debug(("No URL has been provided for past data.",
                            "Model re-computation is not supported."))
             return
-        if inst_id not in self._model_lock.keys():
-            self._model_lock[inst_id] = threading.Lock()
-        self._model_lock[inst_id].acquire(timeout=60)
+        if inst_id not in self._model_lock_id.keys():
+            self._model_lock_id[inst_id] = self._model_lock_num
+            self._model_lock_num += 1
+        uwsgi.lock(self._model_lock_id[inst_id])
         self._recomputation_active[inst_id] = True
         # Delete model from memory
         self._models.pop(inst_id, None)
@@ -402,7 +406,7 @@ class NILM(object):
             if (self._put_count[inst_id] % self.STORE_PERIOD == 0):
                 # Persistent storage
                 self._store_model(inst_id)
-        self._model_lock[inst_id].release()
+        uwsgi.unlock(self._model_lock_id[inst_id])
         self._recomputation_active[inst_id] = False
 
     def on_get(self, req, resp, inst_id):
@@ -410,14 +414,14 @@ class NILM(object):
         On get, the service returns a document describing the status of a
         specific installation.
         """
-        if inst_id not in self._model_lock.keys():
-            self._model_lock[inst_id] = threading.Lock()
+        if inst_id not in self._model_lock_id.keys():
+            self._model_lock_id[inst_id] = self._model_lock_num
             self._model_lock_num += 1
-        self._model_lock[inst_id].acquire(timeout=60)
+        uwsgi.lock(self._model_lock_id[inst_id])
         model = self._load_model(inst_id)
         logging.debug('WSGI lock (GET)')
         resp.body = self._prepare_response_body(model)
-        self._model_lock[inst_id].release()
+        uwsgi.unlock(self._model_lock_id[inst_id])
         logging.debug('WSGI unlock (GET)')
         time.sleep(0.01)
         resp.status = falcon.HTTP_200
@@ -451,7 +455,7 @@ class NILM(object):
             self._models[inst_id] = dill.loads(inst_doc['modelHart'])
             if self._models[inst_id]._lock.locked():
                 self._models[inst_id]._lock.release()
-            self._model_lock[inst_id] = self._model_lock_num
+            self._model_lock_id[inst_id] = self._model_lock_num
             self._model_lock_num += 1
             self._recomputation_active[inst_id] = False
             self._put_count[inst_id] = 0
@@ -460,14 +464,15 @@ class NILM(object):
             resp.status = falcon.HTTP_204
             resp.body = "Model recomputation in progress, send data again later"
             return
-        if inst_id not in self._model_lock.keys():
-            self._model_lock[inst_id] = threading.Lock()
-        self._model_lock[inst_id].acquire(timeout=60)
+        if inst_id not in self._model_lock_id.keys():
+            self._model_lock_id[inst_id] = self._model_lock_num
+            self._model_lock_num += 1
+        uwsgi.lock(self._model_lock_id[inst_id])
         model = self._models[inst_id]
         logging.debug('WSGI lock (PUT)')
         # Process the data
         model.update(data)
-        self._model_lock[inst_id].release()
+        uwsgi.unlock(self._model_lock_id[inst_id])
         logging.debug('WSGI unlock (PUT)')
         time.sleep(0.01)
         # Store data if needed, and prepare response.
@@ -487,7 +492,7 @@ class NILM(object):
         # Remove the model, if it is loaded
         if (inst_id in self._models.keys()):
             del self._models[inst_id]
-            del self._model_lock[inst_id]
+            del self._model_lock_id[inst_id]
         resp.status = falcon.HTTP_200
 
     def perform_clustering(self):
@@ -496,11 +501,12 @@ class NILM(object):
         """
         for inst_id, model in self._models.items():
             # This should never happen
-            if inst_id not in self._model_lock.keys():
-                self._model_lock[inst_id] = threading.Lock()
-            self._model_lock[inst_id].acquire(timeout=60)
+            if inst_id not in self._model_lock_id.keys():
+                self._model_lock_id[inst_id] = self._model_lock_num
+                self._model_lock_num += 1
+            uwsgi.lock(self._model_lock_id[inst_id])
             model.force_clustering(start_thread=True)
-            self._model_lock[inst_id].release()
+            uwsgi.unlock(self._model_lock_id[inst_id])
             time.sleep(5)
 
     def on_post_clustering(self, req, resp, inst_id):
@@ -508,10 +514,10 @@ class NILM(object):
         Starts a clustering thread on the target model
         """
         # Load the model, if not loaded already
-        if inst_id not in self._model_lock.keys():
-            self._model_lock[inst_id] = self._model_lock_num
+        if inst_id not in self._model_lock_id.keys():
+            self._model_lock_id[inst_id] = self._model_lock_num
             self._model_lock_num += 1
-        self._model_lock[inst_id].acquire(timeout=60)
+        uwsgi.lock(self._model_lock_id[inst_id])
         model = self._load_model(inst_id)
         logging.debug('WSGI lock (clustering)')
         if model.force_clustering(start_thread=True):
@@ -519,7 +525,7 @@ class NILM(object):
         else:
             # Conflict
             resp.status = falcon.HTTP_409
-        self._model_lock[inst_id].release()
+        uwsgi.unlock(self._model_lock_id[inst_id])
         logging.debug('WSGI unlock (clustering)')
         time.sleep(0.01)
 
@@ -528,10 +534,10 @@ class NILM(object):
         Requests the list of activations for the appliances of an installation.
         """
         # Load the model, if not loaded already
-        if inst_id not in self._model_lock.keys():
-            self._model_lock[inst_id] = self._model_lock_num
+        if inst_id not in self._model_lock_id.keys():
+            self._model_lock_id[inst_id] = self._model_lock_num
             self._model_lock_num += 1
-        self._model_lock[inst_id].acquire(timeout=60)
+        uwsgi.lock(self._model_lock_id[inst_id])
         model = self._load_model(inst_id)
         payload = []
         logging.debug('WSGI lock (activations)')
@@ -546,7 +552,7 @@ class NILM(object):
                      "end": row.end.timestamp() * 1000,
                      "consumption": consumption}
                 payload.append(b)
-        self._model_lock[inst_id].release()
+        uwsgi.unlock(self._model_lock_id[inst_id])
         logging.debug('WSGI unlock (activations)')
         time.sleep(0.01)
         body = {"payload": payload}
@@ -615,14 +621,14 @@ class NILM(object):
         appliance_id = req.params['appliance_id']
         name = req.params['name']
         category = req.params['type']
-        if inst_id not in self._model_lock.keys():
-            self._model_lock[inst_id] = self._model_lock_num
+        if inst_id not in self._model_lock_id.keys():
+            self._model_lock_id[inst_id] = self._model_lock_num
             self._model_lock_num += 1
-        self._model_lock[inst_id].acquire(timeout=60)
+        uwsgi.lock(self._model_lock_id[inst_id])
         model = self._load_model(inst_id)
         if appliance_id not in model.appliances:
             logging.debug("Appliance id %s not found in model")
-            self._model_lock[inst_id].release()
+            uwsgi.unlock(self._model_lock_id[inst_id])
             time.sleep(0.01)
             resp.status = falcon.HTTP_400
             resp.body = ("Appliance id %s not found" % (appliance_id))
@@ -638,6 +644,6 @@ class NILM(object):
                        prev_category, name, category))
         # Make sure to store the model
         self._store_model(inst_id)
-        self._model_lock[inst_id].release()
+        uwsgi.unlock(self._model_lock_id[inst_id])
         time.sleep(0.01)
         resp.status = falcon.HTTP_200
