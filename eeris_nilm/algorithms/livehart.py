@@ -508,7 +508,6 @@ class LiveHart(object):
             matches = matches[['start', 'end', 'active', 'reactive']]
             clustering_start_ts = self.last_processed_ts
             if len(matches) < self.MIN_EDGES_STATIC_CLUSTERING:
-                self._lock.release()
                 # Set the timestamp, to avoid continuous attempts for clustering
                 # Set timestamp
                 self._last_clustering_ts = clustering_start_ts
