@@ -284,8 +284,7 @@ class NILM(object):
                 # Make sure threading lock is released
                 if self._models[inst_id]._lock.locked():
                     self._models[inst_id]._lock.release()
-                self._model_lock[inst_id] = self._model_lock_num
-                self._model_lock_num += 1
+                self._model_lock[inst_id] = threading.Lock()
                 self._recomputation_active[inst_id] = False
         return self._models[inst_id]
 
@@ -411,7 +410,6 @@ class NILM(object):
         """
         if inst_id not in self._model_lock.keys():
             self._model_lock[inst_id] = threading.Lock()
-            self._model_lock_num += 1
         with self._model_lock[inst_id]:
             model = self._load_model(inst_id)
             logging.debug('WSGI lock (GET)')
@@ -449,8 +447,7 @@ class NILM(object):
             self._models[inst_id] = dill.loads(inst_doc['modelHart'])
             if self._models[inst_id]._lock.locked():
                 self._models[inst_id]._lock.release()
-            self._model_lock[inst_id] = self._model_lock_num
-            self._model_lock_num += 1
+            self._model_lock[inst_id] = threading.Lock()
             self._recomputation_active[inst_id] = False
             self._put_count[inst_id] = 0
         # Inform caller if recomputation is active
@@ -505,8 +502,7 @@ class NILM(object):
         """
         # Load the model, if not loaded already
         if inst_id not in self._model_lock.keys():
-            self._model_lock[inst_id] = self._model_lock_num
-            self._model_lock_num += 1
+            self._model_lock[inst_id] = threading.Lock()
         with self._model_lock[inst_id]:
             model = self._load_model(inst_id)
             logging.debug('WSGI lock (clustering)')
@@ -524,8 +520,7 @@ class NILM(object):
         """
         # Load the model, if not loaded already
         if inst_id not in self._model_lock.keys():
-            self._model_lock[inst_id] = self._model_lock_num
-            self._model_lock_num += 1
+            self._model_lock[inst_id] = threading.Lock()
         with self._model_lock[inst_id]:
             model = self._load_model(inst_id)
             payload = []
@@ -610,8 +605,7 @@ class NILM(object):
         name = req.params['name']
         category = req.params['type']
         if inst_id not in self._model_lock.keys():
-            self._model_lock[inst_id] = self._model_lock_num
-            self._model_lock_num += 1
+            self._model_lock[inst_id] = threading.Lock()
         with self._model_lock[inst_id]:
             model = self._load_model(inst_id)
             if appliance_id not in model.appliances:
