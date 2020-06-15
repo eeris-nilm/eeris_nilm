@@ -18,11 +18,4 @@ import eeris_nilm.app
 import logging
 logging.basicConfig(level=logging.DEBUG)
 
-"""
-Use thread=False to test with "manual" requests for clustering and
-activations (see demo_hart_web_service_1.py).
-
-Otherwise with thread=True a thread is started to perform these operations
-periodically (see demo_hart_web_service_2.py).
-"""
 application = eeris_nilm.app.get_app("ini/eeris.ini", thread=True)

@@ -23,9 +23,8 @@ import pymongo
 import eeris_nilm.nilm
 import eeris_nilm.installation
 
+
 # TODO: Authentication
-
-
 def create_app(conf_file):
     """
     Main web application.
@@ -95,26 +94,15 @@ def create_app(conf_file):
     # Gunicorn expects the 'application' name
     # api = falcon.API(middleware=[auth_middleware])
     api = falcon.API()
-    # NILM
 
+    # NILM
     logging.debug("Setting up connections")
-    nilm = eeris_nilm.nilm.NILM(mdb, thread=thread, act_url=act_url,
-                                comp_url=comp_url, inst_list=inst_ids)
+    nilm = eeris_nilm.nilm.NILM(mdb, config)
+    input_method = config['eeRIS']['input_method']
     if input_method == "rest":
         api.add_route('/nilm/{inst_id}', nilm)
     elif input_method == "mqtt":
-        ca = config['MQTT']['ca']
-        key = config['MQTT']['key']
-        crt = config['MQTT']['crt']
-        broker = config['MQTT']['broker']
-        port = config['MQTT']['port']
-        topic_prefix = config['MQTT']['topic_prefix']
-        client = mqtt.Client("eeris_nilm", clean_session=False)
-        client.tls_set(ca_certs=ca, keyfile=key, certfile=crt)
-        client.tls_insecure_set(True)
-        client.on_connect = 
-        client.on_disconnect
-        client.on_message
+        pass
     else:
         raise ValueError(("Invalid input method %s") % (input_method))
 
@@ -125,12 +113,12 @@ def create_app(conf_file):
     api.add_route('/nilm/{inst_id}/stop_thread', nilm, suffix='stop_thread')
     api.add_route('/nilm/{inst_id}/appliance_name',
                   nilm, suffix='appliance_name')
-    # Installation - disable this for now
+    # Installation manager (for database management - limited functionality)
+    inst_ids = [x.strip() for x in config['eeRIS']['inst_ids'].split(",")]
     inst_manager = eeris_nilm.installation.\
         InstallationManager(mdb, inst_list=inst_ids)
     api.add_route('/installation/{inst_id}/model', inst_manager, suffix='model')
     logging.debug("Ready")
-    client.connect(broker, port=broker_port)
     return api
 
 

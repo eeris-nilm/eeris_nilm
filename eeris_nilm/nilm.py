@@ -46,7 +46,7 @@ class NILM(object):
     # persistently?
     STORE_PERIOD = 10
 
-    def __init__(self, mdb, config, response='cenote', thread=False):
+    def __init__(self, mdb, config, response='cenote'):
         """
         Parameters:
         ----------
@@ -81,14 +81,16 @@ class NILM(object):
         # Recomputation data URL
         self._computations_url = orchestrator_url + \
             config['orchestrator']['comp_endpoint']
-        self._inst_list = config['eeRIS']['inst_ids']
         thread = config['MQTT'].getboolean('thread')
         if thread:
             self._periodic_thread(period=3600)
+            # We want to be able to cancel this. If we don't remove this and
+            # just make it a daemon thread.
             atexit.register(self._cancel_periodic_thread)
         if config['eeRIS']['input_method'] == 'mqtt':
-            self._mqtt_thread = threading.Thread(target=self._mqtt, name='mqtt')
-            atexit.register(self._cancel_mqtt_thread)
+            self._mqtt_thread = threading.Thread(target=self._mqtt, name='mqtt',
+                                                 daemon=True)
+            self._mqtt_thread.start()
 
     def _accept_inst(self, inst_id):
         if self._inst_list is None or inst_id in self._inst_list:
@@ -191,6 +193,8 @@ class NILM(object):
         logging.debug(act_result)
         # Submit new thread
         self._p_thread = threading.Timer(period, target=self._periodic_thread)
+        self._p_thread.daemon = True
+        self._p_thread.start()
 
     def _mqtt(self):
         """
@@ -208,14 +212,18 @@ class NILM(object):
         def on_message(client, userdata, message):
             x = message.topic.split('/')
             inst_id = x[1]
-            msg = message.payload
-            msg_d = json.loads(msg)
-            data = pd.DataFrame(msg_d)
+            msg = message.payload.decode('utf-8')
+            # Convert message payload to pandas dataframe
+            msg_d = json.loads(msg.replace('\'', '\"'))
+            data = pd.DataFrame(msg_d, index=[0])
             data.rename(columns={"ts": "timestamp", "p": "active",
                                  "q": "reactive", "i": "current",
                                  "v": "voltage", "f": "frequency"},
                         inplace=True)
             data.set_index("timestamp", inplace=True, drop=True)
+            data.index = pd.to_datetime(data.index, unit='s')
+            data.index.name = None
+            # Submit for processing by the model
             with self._model_lock[inst_id]:
                 model = self._models[inst_id]
                 logging.debug('NILM lock (PUT)')
@@ -223,7 +231,7 @@ class NILM(object):
                 model.update(data)
             logging.debug('NILM unlock (PUT)')
             time.sleep(0.01)
-            # Store data if needed, and prepare response.
+            # Store data if needed
             self._put_count[inst_id] += 1
             if (self._put_count[inst_id] % self.STORE_PERIOD == 0):
                 # Persistent storage
@@ -233,7 +241,7 @@ class NILM(object):
         key = self._config['MQTT']['key']
         crt = self._config['MQTT']['crt']
         broker = self._config['MQTT']['broker']
-        port = self._config['MQTT']['port']
+        port = int(self._config['MQTT']['port'])
         topic_prefix = self._config['MQTT']['topic_prefix']
         client = mqtt.Client("eeris_nilm", clean_session=False)
         client.tls_set(ca_certs=ca, keyfile=key, certfile=crt)
@@ -267,14 +275,9 @@ class NILM(object):
             if inst_id not in self._model_lock.keys():
                 self._model_lock[inst_id] = threading.Lock()
         # Subscribe
-        sub_list = [topic_prefix + "/" + x for x in self._inst_list]
-        client.subscribe(sub_list, qos=2)
+        sub_list = [(topic_prefix + "/" + x, 2) for x in self._inst_list]
+        client.subscribe(sub_list)
         client.loop_forever()
-
-    def _cancel_mqtt_thread(self):
-        """Stop mqtt thread when the app terminates."""
-        if self._mqtt_thread is not None:
-            self._mqtt_thread.cancel()
 
     def _prepare_response_body(self, model):
         """ Wrapper function """
