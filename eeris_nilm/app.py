@@ -18,6 +18,7 @@ import sys
 import falcon
 import logging
 # from falcon_auth import FalconAuthMiddleware, JWTAuthBackend
+import configparser
 import pymongo
 import eeris_nilm.nilm
 import eeris_nilm.installation
@@ -25,8 +26,7 @@ import eeris_nilm.installation
 # TODO: Authentication
 
 
-def create_app(dburl, dbname, act_url=None, recomp_url=None,
-               secret_key=None, inst_list=None, thread=False):
+def create_app(conf_file):
     """
     Main web application.
 
@@ -37,29 +37,39 @@ def create_app(dburl, dbname, act_url=None, recomp_url=None,
     Parameters
     ----------
 
-    dburl: string
-    MongoDB url (used for model persistent storage)
+    conf_file: String
+    Configuration file in ini format, with the following structure:
 
-    dbname: string
-    MongoDB database name
+    [eeRIS]
+    dburl = mongodb://localhost:27017/ # URL for the local mongodb
+    dbname = eeris  # Database name
+    #input_method = rest  # Input method can be "rest" or "mqtt"
+    input_method = mqtt
+    inst_ids = [id1], [id2], ... # Which installations should we monitor?
+    response = cenote  # Response format. Possible values are cenote and debug
+    thread = False  # Initiate a periodic thread to send activations. If false,
+                    # then these should be sent manually.
 
-    act_url : string
-    Activations service URL (for submitting detected device activations for
-    storage). If none, then a JSON with the activations is printed in the
-    stdout, for debugging purposes.
+    [REST]
+    jwt_psk = [secret]  # jwt pre-shared key
 
-    recomp_url: string
-    URL of service that provides retrospective appliance data
+    [MQTT]
+    mqtt_broker = [url] # URL to the mqtt broker
+    mqtt_crt = /path/to/client.crt # Client certificate path
+    mqtt_key = /path/to/client.key # Client certificate key path
+    mqtt_ca_key = /path/to/CA.crt # Certificate Authority path
+    mqtt_client_pass = [secret] # Client key passphrase
+    mqtt_topic_prefix = eeris # mqtt topic prefix to subscribe
 
-    secret_key: string
-    Key used for JWT authentication. NOT IMPLEMENTED
-
-    inst_list: list of strings
-    List of installation ids to be handled by this application instance. This
-    parameter is directly passed to the NILM object instance.
-
-    thread: bool
-    Initiate a periodic thread to send activations.
+    [orchestrator]
+    url = [url] # eeRIS orchestrator URL
+    act_endpoint = historical/events   # Activations service URL (for
+                                       # submitting detected device activations
+                                       # for storage). If none, then a JSON with
+                                       # the activations is printed in the
+                                       # stdout, for debugging purposes.
+    comp_endpoint = historical/   # Endpoint for requesting batch historical
+                                  # data for recomputation purposes
     """
     # # Authentication
     # def user_loader(username, password):
@@ -67,9 +77,14 @@ def create_app(dburl, dbname, act_url=None, recomp_url=None,
     # auth_backend = JWTAuthBackend()
     # auth_middleware = FalconAuthMiddleware(auth_backend)
 
+    # Config file parsing
+    config = configparser.ConfigParser()
+    config.read(conf_file)
+
     # DB connection
     logging.debug("Connecting to database")
-    mclient = pymongo.MongoClient(dburl)
+    mclient = pymongo.MongoClient(config['eeRIS']['dburl'])
+    dbname = config['eeRIS']['dbname']
     dblist = mclient.list_database_names()
     if dbname in dblist:
         mdb = mclient[dbname]
@@ -81,15 +96,28 @@ def create_app(dburl, dbname, act_url=None, recomp_url=None,
     # api = falcon.API(middleware=[auth_middleware])
     api = falcon.API()
     # NILM
-    # orchestrator_url = 'http://localhost:8001/'
-    orchestrator_url = 'http://83.212.104.172:8000/'
-    act_url = orchestrator_url + 'historical/events/'
-    comp_url = orchestrator_url + 'historical/'
 
     logging.debug("Setting up connections")
     nilm = eeris_nilm.nilm.NILM(mdb, thread=thread, act_url=act_url,
-                                comp_url=comp_url)
-    api.add_route('/nilm/{inst_id}', nilm)
+                                comp_url=comp_url, inst_list=inst_ids)
+    if input_method == "rest":
+        api.add_route('/nilm/{inst_id}', nilm)
+    elif input_method == "mqtt":
+        ca = config['MQTT']['ca']
+        key = config['MQTT']['key']
+        crt = config['MQTT']['crt']
+        broker = config['MQTT']['broker']
+        port = config['MQTT']['port']
+        topic_prefix = config['MQTT']['topic_prefix']
+        client = mqtt.Client("eeris_nilm", clean_session=False)
+        client.tls_set(ca_certs=ca, keyfile=key, certfile=crt)
+        client.tls_insecure_set(True)
+        client.on_connect = 
+        client.on_disconnect
+        client.on_message
+    else:
+        raise ValueError(("Invalid input method %s") % (input_method))
+
     api.add_route('/nilm/{inst_id}/clustering', nilm, suffix='clustering')
     api.add_route('/nilm/{inst_id}/activations', nilm, suffix='activations')
     api.add_route('/nilm/{inst_id}/recomputation', nilm, suffix='recomputation')
@@ -97,15 +125,14 @@ def create_app(dburl, dbname, act_url=None, recomp_url=None,
     api.add_route('/nilm/{inst_id}/stop_thread', nilm, suffix='stop_thread')
     api.add_route('/nilm/{inst_id}/appliance_name',
                   nilm, suffix='appliance_name')
-    # Installation
-    api.add_route('/installation/{inst_id}/model',
-                  eeris_nilm.installation.InstallationManager(mdb),
-                  suffix='model')
+    # Installation - disable this for now
+    inst_manager = eeris_nilm.installation.\
+        InstallationManager(mdb, inst_list=inst_ids)
+    api.add_route('/installation/{inst_id}/model', inst_manager, suffix='model')
     logging.debug("Ready")
+    client.connect(broker, port=broker_port)
     return api
 
 
-def get_app(inst_list=None, thread=False):
-    dburl = "mongodb://localhost:27017/"
-    dbname = "eeris"
-    return create_app(dburl, dbname, inst_list, thread)
+def get_app(conf_file):
+    return create_app(conf_file)

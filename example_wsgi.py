@@ -25,4 +25,4 @@ activations (see demo_hart_web_service_1.py).
 Otherwise with thread=True a thread is started to perform these operations
 periodically (see demo_hart_web_service_2.py).
 """
-application = eeris_nilm.app.get_app(thread=True)
+application = eeris_nilm.app.get_app("ini/eeris.ini", thread=True)

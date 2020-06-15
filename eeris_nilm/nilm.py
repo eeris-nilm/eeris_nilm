@@ -19,6 +19,7 @@ import pandas as pd
 import datetime as dt
 import dill
 import json
+import paho.mqtt.client as mqtt
 import logging
 import time
 import datetime
@@ -45,8 +46,7 @@ class NILM(object):
     # persistently?
     STORE_PERIOD = 10
 
-    def __init__(self, mdb, act_url=None, comp_url=None,
-                 response='cenote', thread=False):
+    def __init__(self, mdb, config, response='cenote', thread=False):
         """
         Parameters:
         ----------
@@ -54,21 +54,13 @@ class NILM(object):
         mdb: pymongo.database.Database
         PyMongo database instance for persistent storage and loading
 
-        act_url: URL where detected activations will be submitted. If None, they
-        are simply printed on the debug output (through logging.debug)
+        config: configparser.ConfigParser
+        ConfigParser object with sections described in app.create_app()
 
-        comp_url: URL where the data are requested from for model recomputation
-        purposes. If None, then no recomputation is possible.
-
-        response: Selected response format. Default is 'cenote' for integration
-        with the eeRIS system
-
-        thread: bool
-        Whether to start a thread for clustering and activation detection at
-        startup
         """
         # Add state variables as needed
         self._mdb = mdb
+        self._config = config
         self._models = dict()
         self._put_count = dict()
         self._prev = 0.0
@@ -76,12 +68,35 @@ class NILM(object):
         self._model_lock = dict()
         self._recomputation_active = dict()
         self._recomputation_thread = None
-        self._thread = None
-        self._activations_url = act_url  # Where to send device activations
-        self._computations_url = comp_url  # Recomputation data URL
+        self._mqtt_thread = None
+        self._p_thread = None
+        self._input_method = config['eeRIS']['input_method']
+        self._inst_list = \
+            [x.strip() for x in config['eeRIS']['inst_ids'].split(",")]
+        self._jwt_psk = config['REST']['jwt_psk']
+        orchestrator_url = config['orchestrator']['url']
+        # Where to send device activations
+        self._activations_url = orchestrator_url + \
+            config['orchestrator']['act_endpoint']
+        # Recomputation data URL
+        self._computations_url = orchestrator_url + \
+            config['orchestrator']['comp_endpoint']
+        self._inst_list = config['eeRIS']['inst_ids']
+        thread = config['MQTT'].getboolean('thread')
         if thread:
             self._periodic_thread(period=3600)
-            atexit.register(self._cancel_thread)
+            atexit.register(self._cancel_periodic_thread)
+        if config['eeRIS']['input_method'] == 'mqtt':
+            self._mqtt_thread = threading.Thread(target=self._mqtt, name='mqtt')
+            atexit.register(self._cancel_mqtt_thread)
+
+    def _accept_inst(self, inst_id):
+        if self._inst_list is None or inst_id in self._inst_list:
+            return True
+        else:
+            logging.debug(("Received installation id %s which is not in list."
+                           "Ignoring.") % (inst_id))
+            return False
 
     def _send_activations(self):
         """
@@ -147,15 +162,15 @@ class NILM(object):
                 # Move on to the next installation
         return ret
 
-    def _cancel_thread(self):
+    def _cancel_periodic_thread(self):
         """Stop clustering thread when the app terminates."""
-        if self._thread is not None:
-            self._thread.cancel()
+        if self._p_thread is not None:
+            self._p_thread.cancel()
 
     def _periodic_thread(self, period=3600, clustering=False):
         """
-        Start a background clustering thread which will perform clustering in
-        all loaded models at regular intervals.
+        Start a background thread which will send activations for storage and
+        optionally perform clustering in all loaded models at regular intervals.
 
         Parameters
         ----------
@@ -175,7 +190,91 @@ class NILM(object):
         logging.debug("Activations report:")
         logging.debug(act_result)
         # Submit new thread
-        self._thread = threading.Timer(period, target=self._periodic_thread)
+        self._p_thread = threading.Timer(period, target=self._periodic_thread)
+
+    def _mqtt(self):
+        """
+        Thread for data acquisition from the mqtt broker.
+        """
+        def on_connect(client, userdata, flags, rc):
+            print("MQTT connection returned " + mqtt.connack_string(rc))
+
+        def on_log(client, userdata, level, buf):
+            print(buf)
+
+        def on_disconnect(client, userdata, rc):
+            print("MQTT client disconnected" + mqtt.connack_string(rc))
+
+        def on_message(client, userdata, message):
+            x = message.topic.split('/')
+            inst_id = x[1]
+            msg = message.payload
+            msg_d = json.loads(msg)
+            data = pd.DataFrame(msg_d)
+            data.rename(columns={"ts": "timestamp", "p": "active",
+                                 "q": "reactive", "i": "current",
+                                 "v": "voltage", "f": "frequency"},
+                        inplace=True)
+            data.set_index("timestamp", inplace=True, drop=True)
+            with self._model_lock[inst_id]:
+                model = self._models[inst_id]
+                logging.debug('NILM lock (PUT)')
+                # Process the data
+                model.update(data)
+            logging.debug('NILM unlock (PUT)')
+            time.sleep(0.01)
+            # Store data if needed, and prepare response.
+            self._put_count[inst_id] += 1
+            if (self._put_count[inst_id] % self.STORE_PERIOD == 0):
+                # Persistent storage
+                self._store_model(inst_id)
+
+        ca = self._config['MQTT']['ca']
+        key = self._config['MQTT']['key']
+        crt = self._config['MQTT']['crt']
+        broker = self._config['MQTT']['broker']
+        port = self._config['MQTT']['port']
+        topic_prefix = self._config['MQTT']['topic_prefix']
+        client = mqtt.Client("eeris_nilm", clean_session=False)
+        client.tls_set(ca_certs=ca, keyfile=key, certfile=crt)
+        client.tls_insecure_set(True)
+        client.on_connect = on_connect
+        client.on_disconnect = on_disconnect
+        client.on_log = on_log
+        client.on_message = on_message
+        client.connect(broker, port=port)
+        # Prepare the models
+        for inst_id in self._inst_list:
+            # Load or create the model, if not available
+            if (inst_id not in self._models.keys()):
+                inst_doc = self._mdb.models.find_one({"meterId": inst_id})
+                if inst_doc is None:
+                    modelstr = dill.dumps(
+                        livehart.LiveHart(installation_id=inst_id)
+                    )
+                    dtime = dt.datetime.now().strftime('%Y-%m-%dT%H:%M:%S%z')
+                    inst_doc = {'meterId': inst_id,
+                                'lastUpdate': dtime,
+                                'debugInstallation': True,
+                                'modelHart': modelstr}
+                    self._mdb.models.insert_one(inst_doc)
+                self._models[inst_id] = dill.loads(inst_doc['modelHart'])
+                if self._models[inst_id]._lock.locked():
+                    self._models[inst_id]._lock.release()
+                self._model_lock[inst_id] = threading.Lock()
+                self._recomputation_active[inst_id] = False
+                self._put_count[inst_id] = 0
+            if inst_id not in self._model_lock.keys():
+                self._model_lock[inst_id] = threading.Lock()
+        # Subscribe
+        sub_list = [topic_prefix + "/" + x for x in self._inst_list]
+        client.subscribe(sub_list, qos=2)
+        client.loop_forever()
+
+    def _cancel_mqtt_thread(self):
+        """Stop mqtt thread when the app terminates."""
+        if self._mqtt_thread is not None:
+            self._mqtt_thread.cancel()
 
     def _prepare_response_body(self, model):
         """ Wrapper function """
@@ -408,6 +507,11 @@ class NILM(object):
         On get, the service returns a document describing the status of a
         specific installation.
         """
+        if not self._accept_inst(inst_id):
+            resp.status = falcon.HTTP_400
+            resp.body = "Installation not in list for this NILM instance."
+            return
+
         if inst_id not in self._model_lock.keys():
             self._model_lock[inst_id] = threading.Lock()
         with self._model_lock[inst_id]:
@@ -427,6 +531,11 @@ class NILM(object):
         least timestamp as index, active, reactive power and voltage as
         columns).
         """
+        if not self._accept_inst(inst_id):
+            resp.status = falcon.HTTP_400
+            resp.body = "Installation not in list for this NILM instance."
+            return
+
         if req.content_length:
             data = pd.read_json(req.stream)
         else:
@@ -478,6 +587,11 @@ class NILM(object):
         """
         On delete, the service flushes the requested model from memory
         """
+        if not self._accept_inst(inst_id):
+            resp.status = falcon.HTTP_400
+            resp.body = "Installation not in list for this NILM instance."
+            return
+
         # Remove the model, if it is loaded
         if (inst_id in self._models.keys()):
             del self._models[inst_id]
@@ -500,6 +614,11 @@ class NILM(object):
         """
         Starts a clustering thread on the target model
         """
+        if not self._accept_inst(inst_id):
+            resp.status = falcon.HTTP_400
+            resp.body = "Installation not in list for this NILM instance."
+            return
+
         # Load the model, if not loaded already
         if inst_id not in self._model_lock.keys():
             self._model_lock[inst_id] = threading.Lock()
@@ -518,6 +637,11 @@ class NILM(object):
         """
         Requests the list of activations for the appliances of an installation.
         """
+        if not self._accept_inst(inst_id):
+            resp.status = falcon.HTTP_400
+            resp.body = "Installation not in list for this NILM instance."
+            return
+
         # Load the model, if not loaded already
         if inst_id not in self._model_lock.keys():
             self._model_lock[inst_id] = threading.Lock()
@@ -553,6 +677,11 @@ class NILM(object):
         The old model is discarded and a new model is recomputed based on data
         available between start and end timestamps.
         """
+        if not self._accept_inst(inst_id):
+            resp.status = falcon.HTTP_400
+            resp.body = "Installation not in list for this NILM instance."
+            return
+
         # Start recomputation thread
         if 'start' not in req.params or \
            'end' not in req.params or \
@@ -577,16 +706,26 @@ class NILM(object):
         """
         Start periodic computation thread.
         """
+        if not self._accept_inst(inst_id):
+            resp.status = falcon.HTTP_400
+            resp.body = "Installation not in list for this NILM instance."
+            return
+
         # TODO: Fixed period for now. Move this to the request, if needed.
         self._periodic_thread(period=3600)
-        atexit.register(self._cancel_thread)
+        atexit.register(self._cancel_periodic_thread)
         resp.status = falcon.HTTP_200
 
     def on_post_stop_thread(self, req, resp, inst_id):
         """
         Cancels the periodic computation thread.
         """
-        self._cancel_thread()
+        if not self._accept_inst(inst_id):
+            resp.status = falcon.HTTP_400
+            resp.body = "Installation not in list for this NILM instance."
+            return
+
+        self._cancel_periodic_thread()
         resp.status = falcon.HTTP_200
 
     def on_post_appliance_name(self, req, resp, inst_id):
@@ -595,6 +734,11 @@ class NILM(object):
         created. Expects parameters appliance_id, name and category, all
         strings.
         """
+        if not self._accept_inst(inst_id):
+            resp.status = falcon.HTTP_400
+            resp.body = "Installation not in list for this NILM instance."
+            return
+
         if 'appliance_id' not in req.params or \
            'name' not in req.params or \
            'type' not in req.params:
