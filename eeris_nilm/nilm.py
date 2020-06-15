@@ -412,9 +412,9 @@ class NILM(object):
             self._model_lock[inst_id] = threading.Lock()
         with self._model_lock[inst_id]:
             model = self._load_model(inst_id)
-            logging.debug('WSGI lock (GET)')
+            logging.debug('NILM lock (GET)')
             resp.body = self._prepare_response_body(model)
-        logging.debug('WSGI unlock (GET)')
+        logging.debug('NILM unlock (GET)')
         time.sleep(0.01)
         resp.status = falcon.HTTP_200
 
@@ -459,10 +459,10 @@ class NILM(object):
             self._model_lock[inst_id] = threading.Lock()
         with self._model_lock[inst_id]:
             model = self._models[inst_id]
-            logging.debug('WSGI lock (PUT)')
+            logging.debug('NILM lock (PUT)')
             # Process the data
             model.update(data)
-        logging.debug('WSGI unlock (PUT)')
+        logging.debug('NILM unlock (PUT)')
         time.sleep(0.01)
         # Store data if needed, and prepare response.
         self._put_count[inst_id] += 1
@@ -505,13 +505,13 @@ class NILM(object):
             self._model_lock[inst_id] = threading.Lock()
         with self._model_lock[inst_id]:
             model = self._load_model(inst_id)
-            logging.debug('WSGI lock (clustering)')
+            logging.debug('NILM lock (clustering)')
             if model.force_clustering(start_thread=True):
                 resp.status = falcon.HTTP_200
             else:
                 # Conflict
                 resp.status = falcon.HTTP_409
-        logging.debug('WSGI unlock (clustering)')
+        logging.debug('NILM unlock (clustering)')
         time.sleep(0.01)
 
     def on_get_activations(self, req, resp, inst_id):
@@ -524,7 +524,7 @@ class NILM(object):
         with self._model_lock[inst_id]:
             model = self._load_model(inst_id)
             payload = []
-            logging.debug('WSGI lock (activations)')
+            logging.debug('NILM lock (activations)')
             for a_k, a in model.appliances.items():
                 for row in a.activations.itertuples():
                     # Energy consumption in kWh
@@ -536,7 +536,7 @@ class NILM(object):
                          "end": row.end.timestamp() * 1000,
                          "consumption": consumption}
                     payload.append(b)
-        logging.debug('WSGI unlock (activations)')
+        logging.debug('NILM unlock (activations)')
         time.sleep(0.01)
         body = {"payload": payload}
         resp.body = json.dumps(body)
