@@ -243,7 +243,8 @@ class NILM(object):
         broker = self._config['MQTT']['broker']
         port = int(self._config['MQTT']['port'])
         topic_prefix = self._config['MQTT']['topic_prefix']
-        client = mqtt.Client("eeris_nilm", clean_session=False)
+        identity = self._config['MQTT']['identity']
+        client = mqtt.Client(identity, clean_session=False)
         client.tls_set(ca_certs=ca, keyfile=key, certfile=crt)
         client.tls_insecure_set(True)
         client.on_connect = on_connect
@@ -537,6 +538,11 @@ class NILM(object):
         if not self._accept_inst(inst_id):
             resp.status = falcon.HTTP_400
             resp.body = "Installation not in list for this NILM instance."
+            return
+        if self._input_method != 'rest':
+            resp.status = falcon.HTTP_405
+            resp.body = "PUT method not allows when operating" + \
+                "outside 'REST' mode"
             return
 
         if req.content_length:

@@ -17,7 +17,7 @@ limitations under the License.
 import sys
 import falcon
 import logging
-# from falcon_auth import FalconAuthMiddleware, JWTAuthBackend
+from falcon_auth import FalconAuthMiddleware, JWTAuthBackend
 import configparser
 import pymongo
 import eeris_nilm.nilm
@@ -53,12 +53,13 @@ def create_app(conf_file):
     jwt_psk = [secret]  # jwt pre-shared key
 
     [MQTT]
-    mqtt_broker = [url] # URL to the mqtt broker
-    mqtt_crt = /path/to/client.crt # Client certificate path
-    mqtt_key = /path/to/client.key # Client certificate key path
-    mqtt_ca_key = /path/to/CA.crt # Certificate Authority path
-    mqtt_client_pass = [secret] # Client key passphrase
-    mqtt_topic_prefix = eeris # mqtt topic prefix to subscribe
+    broker = [url] # URL to the mqtt broker
+    crt = /path/to/client.crt # Client certificate path
+    key = /path/to/client.key # Client certificate key path
+    ca_key = /path/to/CA.crt # Certificate Authority path
+    client_pass = [secret] # Client key passphrase
+    topic_prefix = eeris # mqtt topic prefix to subscribe
+    identity = eeris_nilm_local # Identity for mqtt client
 
     [orchestrator]
     url = [url] # eeRIS orchestrator URL
@@ -70,12 +71,6 @@ def create_app(conf_file):
     comp_endpoint = historical/   # Endpoint for requesting batch historical
                                   # data for recomputation purposes
     """
-    # # Authentication
-    # def user_loader(username, password):
-    #     return {'username': username}
-    # auth_backend = JWTAuthBackend()
-    # auth_middleware = FalconAuthMiddleware(auth_backend)
-
     # Config file parsing
     config = configparser.ConfigParser()
     config.read(conf_file)
@@ -91,21 +86,22 @@ def create_app(conf_file):
         sys.stderr.write('ERROR: Database ' + dbname + ' not found. Exiting.')
         return
 
-    # Gunicorn expects the 'application' name
-    # api = falcon.API(middleware=[auth_middleware])
-    api = falcon.API()
+    # Authentication
+    auth_backend = JWTAuthBackend(lambda user: user,
+                                  config['REST']['jwt_psk'],
+                                  algorithm='HS256',
+                                  expiration_delta=24*60*60)
+    auth_middleware = FalconAuthMiddleware(auth_backend,
+                                           exempt_methods=['HEAD'])
+    # auth_middleware = FalconAuthMiddleware(auth_backend)
+
+    api = falcon.API(middleware=[auth_middleware])
+    # api = falcon.API()
 
     # NILM
     logging.debug("Setting up connections")
     nilm = eeris_nilm.nilm.NILM(mdb, config)
-    input_method = config['eeRIS']['input_method']
-    if input_method == "rest":
-        api.add_route('/nilm/{inst_id}', nilm)
-    elif input_method == "mqtt":
-        pass
-    else:
-        raise ValueError(("Invalid input method %s") % (input_method))
-
+    api.add_route('/nilm/{inst_id}', nilm)
     api.add_route('/nilm/{inst_id}/clustering', nilm, suffix='clustering')
     api.add_route('/nilm/{inst_id}/activations', nilm, suffix='activations')
     api.add_route('/nilm/{inst_id}/recomputation', nilm, suffix='recomputation')
