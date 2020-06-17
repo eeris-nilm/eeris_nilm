@@ -19,10 +19,10 @@ import pandas as pd
 import datetime as dt
 import dill
 import json
+import paho.mqtt.client as mqtt
 import logging
 import time
 import datetime
-import uwsgi  # Experiment with uwsgi locks. Can we replace with threading?
 import threading
 import atexit
 import requests
@@ -46,8 +46,7 @@ class NILM(object):
     # persistently?
     STORE_PERIOD = 10
 
-    def __init__(self, mdb, act_url=None, comp_url=None,
-                 response='cenote', thread=False):
+    def __init__(self, mdb, config, response='cenote'):
         """
         Parameters:
         ----------
@@ -55,35 +54,51 @@ class NILM(object):
         mdb: pymongo.database.Database
         PyMongo database instance for persistent storage and loading
 
-        act_url: URL where detected activations will be submitted. If None, they
-        are simply printed on the debug output (through logging.debug)
+        config: configparser.ConfigParser
+        ConfigParser object with sections described in app.create_app()
 
-        comp_url: URL where the data are requested from for model recomputation
-        purposes. If None, then no recomputation is possible.
-
-        response: Selected response format. Default is 'cenote' for integration
-        with the eeRIS system
-
-        thread: bool
-        Whether to start a thread for clustering and activation detection at
-        startup
         """
         # Add state variables as needed
         self._mdb = mdb
+        self._config = config
         self._models = dict()
         self._put_count = dict()
         self._prev = 0.0
         self._response = response
-        self._model_lock_id = dict()
-        self._model_lock_num = 1
+        self._model_lock = dict()
         self._recomputation_active = dict()
         self._recomputation_thread = None
-        self._thread = None
-        self._activations_url = act_url  # Where to send device activations
-        self._computations_url = comp_url  # Recomputation data URL
+        self._mqtt_thread = None
+        self._p_thread = None
+        self._input_method = config['eeRIS']['input_method']
+        self._inst_list = \
+            [x.strip() for x in config['eeRIS']['inst_ids'].split(",")]
+        self._jwt_psk = config['REST']['jwt_psk']
+        orchestrator_url = config['orchestrator']['url']
+        # Where to send device activations
+        self._activations_url = orchestrator_url + \
+            config['orchestrator']['act_endpoint']
+        # Recomputation data URL
+        self._computations_url = orchestrator_url + \
+            config['orchestrator']['comp_endpoint']
+        thread = config['MQTT'].getboolean('thread')
         if thread:
             self._periodic_thread(period=3600)
-            atexit.register(self._cancel_thread)
+            # We want to be able to cancel this. If we don't remove this and
+            # just make it a daemon thread.
+            atexit.register(self._cancel_periodic_thread)
+        if config['eeRIS']['input_method'] == 'mqtt':
+            self._mqtt_thread = threading.Thread(target=self._mqtt, name='mqtt',
+                                                 daemon=True)
+            self._mqtt_thread.start()
+
+    def _accept_inst(self, inst_id):
+        if self._inst_list is None or inst_id in self._inst_list:
+            return True
+        else:
+            logging.debug(("Received installation id %s which is not in list."
+                           "Ignoring.") % (inst_id))
+            return False
 
     def _send_activations(self):
         """
@@ -100,65 +115,64 @@ class NILM(object):
         """
         ret = {}
         for inst_id, model in self._models.items():
-            if inst_id not in self._model_lock_id.keys():
-                self._model_lock_id[inst_id] = self._model_lock_num
-                self._model_lock_num += 1
-            uwsgi.lock(self._model_lock_id[inst_id])
-            payload = []
-            for a_k, a in model.appliances:
-                # For now, do not mark activations as sent (we'll do that only
-                # if data have been successfully sent)
-                activations = a.return_new_activations(update_ts=False)
-                for row in activations.itertuples():
-                    # Energy consumption in kWh
-                    # TODO: Correct consumption by reversing power normalization
-                    consumption = (row.end - row.start).seconds / 3600.0 * \
-                        row.active / 1000.0
-                    b = {
-                        "data":
-                        {
-                            "installationid": inst_id,
-                            "deviceid": a.appliance_id,
-                            "start": row.start.timestamp() * 1000,
-                            "end": row.end.timestamp() * 1000,
-                            "consumption": consumption,
-                            "algorithm_id": model.VERSION
+            if inst_id not in self._model_lock.keys():
+                self._model_lock[inst_id] = threading.Lock()
+            with self._model_lock[inst_id]:
+                payload = []
+                for a_k, a in model.appliances:
+                    # For now, do not mark activations as sent (we'll do that
+                    # only if data have been successfully sent)
+                    activations = a.return_new_activations(update_ts=False)
+                    for row in activations.itertuples():
+                        # Energy consumption in kWh
+                        # TODO: Correct consumption by reversing power
+                        # normalization
+                        consumption = (row.end - row.start).seconds / 3600.0 * \
+                            row.active / 1000.0
+                        b = {
+                            "data":
+                            {
+                                "installationid": inst_id,
+                                "deviceid": a.appliance_id,
+                                "start": row.start.timestamp() * 1000,
+                                "end": row.end.timestamp() * 1000,
+                                "consumption": consumption,
+                                "algorithm_id": model.VERSION
+                            }
                         }
-                    }
-                    payload.append(b)
-            body = {
-                "payload": payload
-            }
-            # Send stuff
-            if self._activations_url is not None:
-                resp = requests.post(self._activations_url,
-                                     json=json.dumps(body))
-                if resp.status_code != falcon.HTTP_200:
-                    logging.debug(
-                        "Sending of activation data for %s failed: (%d, %s)" %
-                        (inst_id, resp.status_code, resp.text)
-                    )
-                    ret[inst_id] = resp
+                        payload.append(b)
+                body = {
+                    "payload": payload
+                }
+                # Send stuff
+                if self._activations_url is not None:
+                    resp = requests.post(self._activations_url,
+                                         json=json.dumps(body))
+                    if resp.status_code != falcon.HTTP_200:
+                        logging.debug(
+                            "Sending of activation data for %s failed: (%d, %s)"
+                            % (inst_id, resp.status_code, resp.text)
+                        )
+                        ret[inst_id] = resp
+                    else:
+                        # Everything went well, mark the activations as sent
+                        ret[inst_id] = \
+                            json.dumps(a.return_new_activations(update_ts=True))
                 else:
-                    # Everything went well, mark the activations as sent
                     ret[inst_id] = \
                         json.dumps(a.return_new_activations(update_ts=True))
-            else:
-                ret[inst_id] = \
-                    json.dumps(a.return_new_activations(update_ts=True))
-            # Move on to the next installation
-            uwsgi.unlock(self._model_lock_id[inst_id])
+                # Move on to the next installation
         return ret
 
-    def _cancel_thread(self):
+    def _cancel_periodic_thread(self):
         """Stop clustering thread when the app terminates."""
-        if self._thread is not None:
-            self._thread.cancel()
+        if self._p_thread is not None:
+            self._p_thread.cancel()
 
     def _periodic_thread(self, period=3600, clustering=False):
         """
-        Start a background clustering thread which will perform clustering in
-        all loaded models at regular intervals.
+        Start a background thread which will send activations for storage and
+        optionally perform clustering in all loaded models at regular intervals.
 
         Parameters
         ----------
@@ -178,7 +192,93 @@ class NILM(object):
         logging.debug("Activations report:")
         logging.debug(act_result)
         # Submit new thread
-        self._thread = threading.Timer(period, target=self._periodic_thread)
+        self._p_thread = threading.Timer(period, target=self._periodic_thread)
+        self._p_thread.daemon = True
+        self._p_thread.start()
+
+    def _mqtt(self):
+        """
+        Thread for data acquisition from the mqtt broker.
+        """
+        def on_connect(client, userdata, flags, rc):
+            print("MQTT connection returned " + mqtt.connack_string(rc))
+
+        def on_log(client, userdata, level, buf):
+            print(buf)
+
+        def on_disconnect(client, userdata, rc):
+            print("MQTT client disconnected" + mqtt.connack_string(rc))
+
+        def on_message(client, userdata, message):
+            x = message.topic.split('/')
+            inst_id = x[1]
+            msg = message.payload.decode('utf-8')
+            # Convert message payload to pandas dataframe
+            msg_d = json.loads(msg.replace('\'', '\"'))
+            data = pd.DataFrame(msg_d, index=[0])
+            data.rename(columns={"ts": "timestamp", "p": "active",
+                                 "q": "reactive", "i": "current",
+                                 "v": "voltage", "f": "frequency"},
+                        inplace=True)
+            data.set_index("timestamp", inplace=True, drop=True)
+            data.index = pd.to_datetime(data.index, unit='s')
+            data.index.name = None
+            # Submit for processing by the model
+            with self._model_lock[inst_id]:
+                model = self._models[inst_id]
+                logging.debug('NILM lock (PUT)')
+                # Process the data
+                model.update(data)
+            logging.debug('NILM unlock (PUT)')
+            time.sleep(0.01)
+            # Store data if needed
+            self._put_count[inst_id] += 1
+            if (self._put_count[inst_id] % self.STORE_PERIOD == 0):
+                # Persistent storage
+                self._store_model(inst_id)
+
+        ca = self._config['MQTT']['ca']
+        key = self._config['MQTT']['key']
+        crt = self._config['MQTT']['crt']
+        broker = self._config['MQTT']['broker']
+        port = int(self._config['MQTT']['port'])
+        topic_prefix = self._config['MQTT']['topic_prefix']
+        identity = self._config['MQTT']['identity']
+        client = mqtt.Client(identity, clean_session=False)
+        client.tls_set(ca_certs=ca, keyfile=key, certfile=crt)
+        client.tls_insecure_set(True)
+        client.on_connect = on_connect
+        client.on_disconnect = on_disconnect
+        client.on_log = on_log
+        client.on_message = on_message
+        client.connect(broker, port=port)
+        # Prepare the models
+        for inst_id in self._inst_list:
+            # Load or create the model, if not available
+            if (inst_id not in self._models.keys()):
+                inst_doc = self._mdb.models.find_one({"meterId": inst_id})
+                if inst_doc is None:
+                    modelstr = dill.dumps(
+                        livehart.LiveHart(installation_id=inst_id)
+                    )
+                    dtime = dt.datetime.now().strftime('%Y-%m-%dT%H:%M:%S%z')
+                    inst_doc = {'meterId': inst_id,
+                                'lastUpdate': dtime,
+                                'debugInstallation': True,
+                                'modelHart': modelstr}
+                    self._mdb.models.insert_one(inst_doc)
+                self._models[inst_id] = dill.loads(inst_doc['modelHart'])
+                if self._models[inst_id]._lock.locked():
+                    self._models[inst_id]._lock.release()
+                self._model_lock[inst_id] = threading.Lock()
+                self._recomputation_active[inst_id] = False
+                self._put_count[inst_id] = 0
+            if inst_id not in self._model_lock.keys():
+                self._model_lock[inst_id] = threading.Lock()
+        # Subscribe
+        sub_list = [(topic_prefix + "/" + x, 2) for x in self._inst_list]
+        client.subscribe(sub_list)
+        client.loop_forever()
 
     def _prepare_response_body(self, model):
         """ Wrapper function """
@@ -287,8 +387,7 @@ class NILM(object):
                 # Make sure threading lock is released
                 if self._models[inst_id]._lock.locked():
                     self._models[inst_id]._lock.release()
-                self._model_lock_id[inst_id] = self._model_lock_num
-                self._model_lock_num += 1
+                self._model_lock[inst_id] = threading.Lock()
                 self._recomputation_active[inst_id] = False
         return self._models[inst_id]
 
@@ -338,75 +437,73 @@ class NILM(object):
             logging.debug(("No URL has been provided for past data.",
                            "Model re-computation is not supported."))
             return
-        if inst_id not in self._model_lock_id.keys():
-            self._model_lock_id[inst_id] = self._model_lock_num
-            self._model_lock_num += 1
-        uwsgi.lock(self._model_lock_id[inst_id])
-        self._recomputation_active[inst_id] = True
-        # Delete model from memory
-        self._models.pop(inst_id, None)
-        # Delete model from database
-        result = self._mdb.models.delete_many({'meterId': inst_id})
-        dcount = int(result.deleted_count)
-        if dcount == 0:
-            logging.debug("Installation did not exist in the database")
-        elif dcount > 1:
-            logging.debug("More than one documents deleted in database")
-        # Prepare new model
-        modelstr = dill.dumps(livehart.LiveHart(installation_id=inst_id))
-        inst_doc = {'meterId': inst_id,
-                    'lastUpdate':
-                    dt.datetime.now().strftime('%Y-%m-%dT%H:%M:%S%z'),
-                    'debugInstallation': True,
-                    'modelHart': modelstr}
-        self._mdb.models.insert_one(inst_doc)
-        self._models[inst_id] = dill.loads(inst_doc['modelHart'])
-        if self._models[inst_id]._lock.locked():
-            self._models[inst_doc]._lock.release()
-        self._put_count[inst_id] = 0
-        model = self._models[inst_id]
-        url = self._computations_url + inst_id
-        # Main recomputation loop.
-        rstep = step
-        for ts in range(start_ts, end_ts-warmup_period, rstep):
-            # Endpoint expects timestamp in milliseconds since unix epoch
-            st = ts * 1000
-            if ts + rstep < end_ts:
-                et = (ts + rstep) * 1000
-            else:
-                et = end_ts * 1000
+        if inst_id not in self._model_lock.keys():
+            self._model_lock[inst_id] = threading.Lock()
+        with self._model_lock[inst_id]:
+            self._recomputation_active[inst_id] = True
+            # Delete model from memory
+            self._models.pop(inst_id, None)
+            # Delete model from database
+            result = self._mdb.models.delete_many({'meterId': inst_id})
+            dcount = int(result.deleted_count)
+            if dcount == 0:
+                logging.debug("Installation did not exist in the database")
+            elif dcount > 1:
+                logging.debug("More than one documents deleted in database")
+            # Prepare new model
+            modelstr = dill.dumps(livehart.LiveHart(installation_id=inst_id))
+            inst_doc = {'meterId': inst_id,
+                        'lastUpdate':
+                        dt.datetime.now().strftime('%Y-%m-%dT%H:%M:%S%z'),
+                        'debugInstallation': True,
+                        'modelHart': modelstr}
+            self._mdb.models.insert_one(inst_doc)
+            self._models[inst_id] = dill.loads(inst_doc['modelHart'])
+            if self._models[inst_id]._lock.locked():
+                self._models[inst_doc]._lock.release()
+            self._put_count[inst_id] = 0
+            model = self._models[inst_id]
+            url = self._computations_url + inst_id
+            # Main recomputation loop.
+            rstep = step
+            for ts in range(start_ts, end_ts-warmup_period, rstep):
+                # Endpoint expects timestamp in milliseconds since unix epoch
+                st = ts * 1000
+                if ts + rstep < end_ts:
+                    et = (ts + rstep) * 1000
+                else:
+                    et = end_ts * 1000
 
+                params = {
+                    "start": st,
+                    "end": et
+                }
+                r = utils.request_with_retry(url, params, request='get')
+                data = utils.get_data_from_cenote_response(r)
+                if data is None:
+                    continue
+                model.update(data, start_thread=False)
+                self._put_count[inst_id] += 1
+                if (self._put_count[inst_id] % self.STORE_PERIOD == 0):
+                    # Persistent storage
+                    self._store_model(inst_id)
+            # Warmup loop (3-seconds step)
+            st = (end_ts - warmup_period + 1) * 1000
+            et = end_ts * 1000
             params = {
                 "start": st,
                 "end": et
             }
             r = utils.request_with_retry(url, params, request='get')
             data = utils.get_data_from_cenote_response(r)
-            if data is None:
-                continue
-            model.update(data)
-            self._put_count[inst_id] += 1
-            if (self._put_count[inst_id] % self.STORE_PERIOD == 0):
-                # Persistent storage
-                self._store_model(inst_id)
-        # Warmup loop (3-seconds step)
-        st = (end_ts - warmup_period + 1) * 1000
-        et = end_ts * 1000
-        params = {
-            "start": st,
-            "end": et
-        }
-        r = utils.request_with_retry(url, params, request='get')
-        data = utils.get_data_from_cenote_response(r)
-        rstep = 3
-        for i in range(0, data.shape[0], rstep):
-            d = data.iloc[i:i+rstep, :]
-            model.update(d)
-            self._put_count[inst_id] += 1
-            if (self._put_count[inst_id] % self.STORE_PERIOD == 0):
-                # Persistent storage
-                self._store_model(inst_id)
-        uwsgi.unlock(self._model_lock_id[inst_id])
+            rstep = 3
+            for i in range(0, data.shape[0], rstep):
+                d = data.iloc[i:i+rstep, :]
+                model.update(d, start_thread=False)
+                self._put_count[inst_id] += 1
+                if (self._put_count[inst_id] % self.STORE_PERIOD == 0):
+                    # Persistent storage
+                    self._store_model(inst_id)
         self._recomputation_active[inst_id] = False
 
     def on_get(self, req, resp, inst_id):
@@ -414,15 +511,18 @@ class NILM(object):
         On get, the service returns a document describing the status of a
         specific installation.
         """
-        if inst_id not in self._model_lock_id.keys():
-            self._model_lock_id[inst_id] = self._model_lock_num
-            self._model_lock_num += 1
-        uwsgi.lock(self._model_lock_id[inst_id])
-        model = self._load_model(inst_id)
-        logging.debug('WSGI lock (GET)')
-        resp.body = self._prepare_response_body(model)
-        uwsgi.unlock(self._model_lock_id[inst_id])
-        logging.debug('WSGI unlock (GET)')
+        if not self._accept_inst(inst_id):
+            resp.status = falcon.HTTP_400
+            resp.body = "Installation not in list for this NILM instance."
+            return
+
+        if inst_id not in self._model_lock.keys():
+            self._model_lock[inst_id] = threading.Lock()
+        with self._model_lock[inst_id]:
+            model = self._load_model(inst_id)
+            logging.debug('NILM lock (GET)')
+            resp.body = self._prepare_response_body(model)
+        logging.debug('NILM unlock (GET)')
         time.sleep(0.01)
         resp.status = falcon.HTTP_200
 
@@ -435,6 +535,16 @@ class NILM(object):
         least timestamp as index, active, reactive power and voltage as
         columns).
         """
+        if not self._accept_inst(inst_id):
+            resp.status = falcon.HTTP_400
+            resp.body = "Installation not in list for this NILM instance."
+            return
+        if self._input_method != 'rest':
+            resp.status = falcon.HTTP_405
+            resp.body = "PUT method not allows when operating" + \
+                "outside 'REST' mode"
+            return
+
         if req.content_length:
             data = pd.read_json(req.stream)
         else:
@@ -455,8 +565,7 @@ class NILM(object):
             self._models[inst_id] = dill.loads(inst_doc['modelHart'])
             if self._models[inst_id]._lock.locked():
                 self._models[inst_id]._lock.release()
-            self._model_lock_id[inst_id] = self._model_lock_num
-            self._model_lock_num += 1
+            self._model_lock[inst_id] = threading.Lock()
             self._recomputation_active[inst_id] = False
             self._put_count[inst_id] = 0
         # Inform caller if recomputation is active
@@ -464,16 +573,14 @@ class NILM(object):
             resp.status = falcon.HTTP_204
             resp.body = "Model recomputation in progress, send data again later"
             return
-        if inst_id not in self._model_lock_id.keys():
-            self._model_lock_id[inst_id] = self._model_lock_num
-            self._model_lock_num += 1
-        uwsgi.lock(self._model_lock_id[inst_id])
-        model = self._models[inst_id]
-        logging.debug('WSGI lock (PUT)')
-        # Process the data
-        model.update(data)
-        uwsgi.unlock(self._model_lock_id[inst_id])
-        logging.debug('WSGI unlock (PUT)')
+        if inst_id not in self._model_lock.keys():
+            self._model_lock[inst_id] = threading.Lock()
+        with self._model_lock[inst_id]:
+            model = self._models[inst_id]
+            logging.debug('NILM lock (PUT)')
+            # Process the data
+            model.update(data)
+        logging.debug('NILM unlock (PUT)')
         time.sleep(0.01)
         # Store data if needed, and prepare response.
         self._put_count[inst_id] += 1
@@ -489,10 +596,15 @@ class NILM(object):
         """
         On delete, the service flushes the requested model from memory
         """
+        if not self._accept_inst(inst_id):
+            resp.status = falcon.HTTP_400
+            resp.body = "Installation not in list for this NILM instance."
+            return
+
         # Remove the model, if it is loaded
         if (inst_id in self._models.keys()):
             del self._models[inst_id]
-            del self._model_lock_id[inst_id]
+            del self._model_lock[inst_id]
         resp.status = falcon.HTTP_200
 
     def perform_clustering(self):
@@ -501,59 +613,63 @@ class NILM(object):
         """
         for inst_id, model in self._models.items():
             # This should never happen
-            if inst_id not in self._model_lock_id.keys():
-                self._model_lock_id[inst_id] = self._model_lock_num
-                self._model_lock_num += 1
-            uwsgi.lock(self._model_lock_id[inst_id])
-            model.force_clustering(start_thread=True)
-            uwsgi.unlock(self._model_lock_id[inst_id])
+            if inst_id not in self._model_lock.keys():
+                self._model_lock[inst_id] = threading.Lock()
+            with self._model_lock[inst_id]:
+                model.force_clustering(start_thread=True)
             time.sleep(5)
 
     def on_post_clustering(self, req, resp, inst_id):
         """
         Starts a clustering thread on the target model
         """
+        if not self._accept_inst(inst_id):
+            resp.status = falcon.HTTP_400
+            resp.body = "Installation not in list for this NILM instance."
+            return
+
         # Load the model, if not loaded already
-        if inst_id not in self._model_lock_id.keys():
-            self._model_lock_id[inst_id] = self._model_lock_num
-            self._model_lock_num += 1
-        uwsgi.lock(self._model_lock_id[inst_id])
-        model = self._load_model(inst_id)
-        logging.debug('WSGI lock (clustering)')
-        if model.force_clustering(start_thread=True):
-            resp.status = falcon.HTTP_200
-        else:
-            # Conflict
-            resp.status = falcon.HTTP_409
-        uwsgi.unlock(self._model_lock_id[inst_id])
-        logging.debug('WSGI unlock (clustering)')
+        if inst_id not in self._model_lock.keys():
+            self._model_lock[inst_id] = threading.Lock()
+        with self._model_lock[inst_id]:
+            model = self._load_model(inst_id)
+            logging.debug('NILM lock (clustering)')
+            if model.force_clustering(start_thread=True):
+                resp.status = falcon.HTTP_200
+            else:
+                # Conflict
+                resp.status = falcon.HTTP_409
+        logging.debug('NILM unlock (clustering)')
         time.sleep(0.01)
 
     def on_get_activations(self, req, resp, inst_id):
         """
         Requests the list of activations for the appliances of an installation.
         """
+        if not self._accept_inst(inst_id):
+            resp.status = falcon.HTTP_400
+            resp.body = "Installation not in list for this NILM instance."
+            return
+
         # Load the model, if not loaded already
-        if inst_id not in self._model_lock_id.keys():
-            self._model_lock_id[inst_id] = self._model_lock_num
-            self._model_lock_num += 1
-        uwsgi.lock(self._model_lock_id[inst_id])
-        model = self._load_model(inst_id)
-        payload = []
-        logging.debug('WSGI lock (activations)')
-        for a_k, a in model.appliances.items():
-            for row in a.activations.itertuples():
-                # Energy consumption in kWh
-                consumption = (row.end - row.start).seconds / 3600.0 * \
-                    row.active / 1000.0
-                b = {"installationid": inst_id,
-                     "deviceid": a.appliance_id,
-                     "start": row.start.timestamp() * 1000,
-                     "end": row.end.timestamp() * 1000,
-                     "consumption": consumption}
-                payload.append(b)
-        uwsgi.unlock(self._model_lock_id[inst_id])
-        logging.debug('WSGI unlock (activations)')
+        if inst_id not in self._model_lock.keys():
+            self._model_lock[inst_id] = threading.Lock()
+        with self._model_lock[inst_id]:
+            model = self._load_model(inst_id)
+            payload = []
+            logging.debug('NILM lock (activations)')
+            for a_k, a in model.appliances.items():
+                for row in a.activations.itertuples():
+                    # Energy consumption in kWh
+                    consumption = (row.end - row.start).seconds / 3600.0 * \
+                        row.active / 1000.0
+                    b = {"installationid": inst_id,
+                         "deviceid": a.appliance_id,
+                         "start": row.start.timestamp() * 1000,
+                         "end": row.end.timestamp() * 1000,
+                         "consumption": consumption}
+                    payload.append(b)
+        logging.debug('NILM unlock (activations)')
         time.sleep(0.01)
         body = {"payload": payload}
         resp.body = json.dumps(body)
@@ -570,6 +686,11 @@ class NILM(object):
         The old model is discarded and a new model is recomputed based on data
         available between start and end timestamps.
         """
+        if not self._accept_inst(inst_id):
+            resp.status = falcon.HTTP_400
+            resp.body = "Installation not in list for this NILM instance."
+            return
+
         # Start recomputation thread
         if 'start' not in req.params or \
            'end' not in req.params or \
@@ -594,16 +715,26 @@ class NILM(object):
         """
         Start periodic computation thread.
         """
+        if not self._accept_inst(inst_id):
+            resp.status = falcon.HTTP_400
+            resp.body = "Installation not in list for this NILM instance."
+            return
+
         # TODO: Fixed period for now. Move this to the request, if needed.
         self._periodic_thread(period=3600)
-        atexit.register(self._cancel_thread)
+        atexit.register(self._cancel_periodic_thread)
         resp.status = falcon.HTTP_200
 
     def on_post_stop_thread(self, req, resp, inst_id):
         """
         Cancels the periodic computation thread.
         """
-        self._cancel_thread()
+        if not self._accept_inst(inst_id):
+            resp.status = falcon.HTTP_400
+            resp.body = "Installation not in list for this NILM instance."
+            return
+
+        self._cancel_periodic_thread()
         resp.status = falcon.HTTP_200
 
     def on_post_appliance_name(self, req, resp, inst_id):
@@ -612,6 +743,11 @@ class NILM(object):
         created. Expects parameters appliance_id, name and category, all
         strings.
         """
+        if not self._accept_inst(inst_id):
+            resp.status = falcon.HTTP_400
+            resp.body = "Installation not in list for this NILM instance."
+            return
+
         if 'appliance_id' not in req.params or \
            'name' not in req.params or \
            'type' not in req.params:
@@ -621,29 +757,28 @@ class NILM(object):
         appliance_id = req.params['appliance_id']
         name = req.params['name']
         category = req.params['type']
-        if inst_id not in self._model_lock_id.keys():
-            self._model_lock_id[inst_id] = self._model_lock_num
-            self._model_lock_num += 1
-        uwsgi.lock(self._model_lock_id[inst_id])
-        model = self._load_model(inst_id)
-        if appliance_id not in model.appliances:
-            logging.debug("Appliance id %s not found in model")
-            uwsgi.unlock(self._model_lock_id[inst_id])
-            time.sleep(0.01)
-            resp.status = falcon.HTTP_400
-            resp.body = ("Appliance id %s not found" % (appliance_id))
-            return
-        prev_name = model.appliances[appliance_id].name
-        prev_category = model.appliances[appliance_id].category
-        model.appliances[appliance_id].name = name
-        model.appliances[appliance_id].category = category
-        model.appliances[appliance_id].verifyied = True
-        logging.debug(("Installation: %s. Renamed appliance %s from %s with "
-                       "category %s to %s with category %s") %
-                      (inst_id, appliance_id, prev_name,
-                       prev_category, name, category))
-        # Make sure to store the model
-        self._store_model(inst_id)
-        uwsgi.unlock(self._model_lock_id[inst_id])
+        if inst_id not in self._model_lock.keys():
+            self._model_lock[inst_id] = threading.Lock()
+        with self._model_lock[inst_id]:
+            model = self._load_model(inst_id)
+            if appliance_id not in model.appliances:
+                logging.debug("Appliance id %s not found in model")
+                self._model_lock[inst_id].release()
+                time.sleep(0.01)
+                resp.status = falcon.HTTP_400
+                resp.body = ("Appliance id %s not found" % (appliance_id))
+                return
+            prev_name = model.appliances[appliance_id].name
+            prev_category = model.appliances[appliance_id].category
+            model.appliances[appliance_id].name = name
+            model.appliances[appliance_id].category = category
+            model.appliances[appliance_id].verifyied = True
+            logging.debug(("Installation: %s. Renamed appliance "
+                           "%s from %s with "
+                           "category %s to %s with category %s") %
+                          (inst_id, appliance_id, prev_name,
+                           prev_category, name, category))
+            # Make sure to store the model
+            self._store_model(inst_id)
         time.sleep(0.01)
         resp.status = falcon.HTTP_200

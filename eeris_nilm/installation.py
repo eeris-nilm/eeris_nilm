@@ -15,6 +15,7 @@ limitations under the License.
 """
 
 import falcon
+import logging
 
 
 class InstallationManager(object):
@@ -22,14 +23,38 @@ class InstallationManager(object):
     Class to handle database management for installations/models.
     """
 
-    def __init__(self, mdb):
+    def __init__(self, mdb, inst_list=None):
+        """
+        Parameters:
+        ----------
+        mdb: pymongo.database.Database
+        PyMongo database instance for persistent storage and loading
+
+        inst_list: List or None
+        List of installations to watch out for. Only accept requests for these.
+        """
         # Database
         self._mdb = mdb
+        self._inst_list = inst_list
+
+    def _accept_inst(self, inst_id):
+        if self._inst_list is None or inst_id in self._inst_list:
+            return True
+        else:
+            logging.debug(("Received installation id %s which is not in list."
+                           "Ignoring.") % (inst_id))
+            return False
 
     def on_get(self, req, resp, inst_id):
         """
         Handling data retrieval, besides "live". Not implemented.
         """
+        if not self._accept_inst(inst_id):
+            resp.status = falcon.HTTP_400
+            resp.body = ("Installation not in list for this InstallationManager"
+                         "instance.")
+            return
+
         raise falcon.HTTPNotImplemented("Data retrieval not implemented",
                                         "Data retrieval not implemented")
 
@@ -41,6 +66,12 @@ class InstallationManager(object):
         production. It will not delete model unless the 'debugInstallation'
         field is set to True.
         """
+        if not self._accept_inst(inst_id):
+            resp.status = falcon.HTTP_400
+            resp.body = ("Installation not in list for this InstallationManager"
+                         "instance.")
+            return
+
         model = self._mdb.models.find_one({"meterId": inst_id})
         if model is None:
             debug = False
