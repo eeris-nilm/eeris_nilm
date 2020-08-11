@@ -502,26 +502,22 @@ class LiveHart(object):
         # NOTE: Explore use of reactive power for matching and clustering
 
         # Do not wait forever
-        if not self._lock.acquire(timeout=120):
-            logging.debug("Static clustering Lock acquire timeout! - 1")
-            return
-        # Select matched edges to use for clustering
-        matches = self._matches.copy()
-        matches = matches[['start', 'end', 'active', 'reactive']]
-        clustering_start_ts = self.last_processed_ts
-        if len(matches) < self.MIN_EDGES_STATIC_CLUSTERING:
-            self._lock.release()
-            # Set the timestamp, to avoid continuous attempts for clustering
-            # Set timestamp
-            self._last_clustering_ts = clustering_start_ts
-            return
-        if not self.batch_mode:
-            start_ts = matches['start'].iloc[-1] - \
-                pd.offsets.Day(self.CLUSTER_DATA_DAYS)
-            matches = matches.loc[matches['start'] > start_ts]
-        matches1 = matches.copy()
-        matches = matches[['active', 'reactive']].values
-        self._lock.release()
+        with self._lock:
+            # Select matched edges to use for clustering
+            matches = self._matches.copy()
+            matches = matches[['start', 'end', 'active', 'reactive']]
+            clustering_start_ts = self.last_processed_ts
+            if len(matches) < self.MIN_EDGES_STATIC_CLUSTERING:
+                # Set the timestamp, to avoid continuous attempts for clustering
+                # Set timestamp
+                self._last_clustering_ts = clustering_start_ts
+                return
+            if not self.batch_mode:
+                start_ts = matches['start'].iloc[-1] - \
+                    pd.offsets.Day(self.CLUSTER_DATA_DAYS)
+                matches = matches.loc[matches['start'] > start_ts]
+            matches1 = matches.copy()
+            matches = matches[['active', 'reactive']].values
         debug_t_start = datetime.datetime.now()
         logging.debug('Initiating static clustering at %s' % debug_t_start)
         if method == "dbscan":
@@ -576,31 +572,29 @@ class LiveHart(object):
         logging.debug('Finished static clustering at %s' % (debug_t_end))
         logging.debug('Total clustering time: %s seconds' %
                       (debug_t_diff.seconds))
-        if not self._lock.acquire(timeout=120):
-            logging.debug("Static clustering lock acquire timeout! - 2")
-            return
-        if not self.appliances:
-            # First time we detect appliances
-            self.appliances = appliances
-        else:
-            # Map to previous.
-            mapping = appliance.appliance_mapping(appliances, self.appliances)
-            self._sync_appliances(appliances, mapping)
-        # Sync live appliances.
-        # Option 1: Just copy the clusters.
-        # self._sync_appliances_live_copy()
+        with self._lock:
+            if not self.appliances:
+                # First time we detect appliances
+                self.appliances = appliances
+            else:
+                # Map to previous.
+                mapping = appliance.appliance_mapping(appliances,
+                                                      self.appliances)
+                self._sync_appliances(appliances, mapping)
+            # Sync live appliances.
+            # Option 1: Just copy the clusters.
+            # self._sync_appliances_live_copy()
 
-        # Option 2: Map and sync.
-        mapping = appliance.appliance_mapping(self.appliances_live,
-                                              self.appliances,
-                                              t=2*self.MATCH_THRESHOLD)
-        self._sync_appliances_live(mapping)
-        # Set timestamp
-        self._last_clustering_ts = clustering_start_ts
+            # Option 2: Map and sync.
+            mapping = appliance.appliance_mapping(self.appliances_live,
+                                                  self.appliances,
+                                                  t=2*self.MATCH_THRESHOLD)
+            self._sync_appliances_live(mapping)
+            # Set timestamp
+            self._last_clustering_ts = clustering_start_ts
 
-        logging.debug('Clustering complete. Current list of appliances:')
-        logging.debug(str(self.appliances))
-        self._lock.release()
+            logging.debug('Clustering complete. Current list of appliances:')
+            logging.debug(str(self.appliances))
 
     def _clean_buffers(self):
         """
@@ -1116,48 +1110,45 @@ class LiveHart(object):
         Threaded version, where a separate clustering thread is started
         """
         # For thread safety
-        if not self._lock.acquire(timeout=120):
-            logging.debug("update(): Lock acquire timeout!")
-            return
-        if data is not None:
-            self.data = data
-        else:
-            # If data is empty, do nothing
-            return
-        # Preprocessing: Resampling, normalization, missing values, etc.
-        self._preprocess()
+        with self._lock:
+            if data is not None:
+                self.data = data
+            else:
+                # If data is empty, do nothing
+                return
+            # Preprocessing: Resampling, normalization, missing values, etc.
+            self._preprocess()
 
-        # Make sure data still exists
-        if self._buffer.empty:
-            return
+            # Make sure data still exists
+            if self._buffer.empty:
+                return
 
-        # Edge detection
-        self._detect_edges_hart()
-        # Edge matching
-        if self._edge_detected:
-            self._match_edges_hart()
+            # Edge detection
+            self._detect_edges_hart()
+            # Edge matching
+            if self._edge_detected:
+                self._match_edges_hart()
 
-        # Sanity checks
-        self._sanity_checks()
+            # Sanity checks
+            self._sanity_checks()
 
-        # Live display update (for demo/debugging purposes)
-        self._update_display()
+            # Live display update (for demo/debugging purposes)
+            self._update_display()
 
-        # TODO: Fix bugs in sanity checks
-        self._match_edges_live()
-        # Sanity checks - live
-        self._sanity_checks_live()
+            # TODO: Fix bugs in sanity checks
+            self._match_edges_live()
+            # Sanity checks - live
+            self._sanity_checks_live()
 
-        # Clustering
-        #
-        # Static clustering option. If needed we will add a dynamic
-        # clustering option in the future. This runs as a thread in the
-        # background.
-        if self._last_clustering_ts is not None:
-            td = self.last_processed_ts - self._last_clustering_ts
-        else:
-            td = self.last_processed_ts - self._start_ts
-        self._lock.release()
+            # Clustering
+            #
+            # Static clustering option. If needed we will add a dynamic
+            # clustering option in the future. This runs as a thread in the
+            # background.
+            if self._last_clustering_ts is not None:
+                td = self.last_processed_ts - self._last_clustering_ts
+            else:
+                td = self.last_processed_ts - self._start_ts
 
         if td.total_seconds() / 3600.0 >= self.CLUSTER_STEP_HOURS:
             self.force_clustering(method=self.CLUSTERING_METHOD,

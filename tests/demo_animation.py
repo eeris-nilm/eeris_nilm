@@ -186,23 +186,34 @@ else:
 
 
 # Edit these to fit your setup.
+
+# The real-time NILM loop runs every 'step' measurements
 step = 3
-save = True
-# save = False
+# Whether to display on the screen or save to a video file. Change this to True
+# to save a file
+# save = True
+save = False
+# In case save is 'True' specify the output directory (which must exist)
+video_out = 'demo_videos'
 inst_id = None
 if dataset == 'redd':
-    p = 'tests/data/house_1'
+    # Replace this with your path to house_1 of the downloaded and extracted
+    # redd dataset
+    p = 'tests/data/redd/house_1'
     house = os.path.basename(p)
     date_start = '2011-04-18T01:00'
     date_end = '2011-04-30T23:59'
     model_path_r = 'tests/data/model_redd_' + house + '.dill'
     model_path_w = 'tests/data/model_redd_' + house + '.dill'
 elif dataset == 'eco':
-    p = 'tests/data/01_sm_csv/01'
+    # Replace this with your path to the corresponding path to the downloaded
+    # and extracted ECO dataset
+    p = 'tests/data/eco/01_sm_csv/01'
     date_start = '2012-06-10T20:55'
     date_end = '2012-06-20T23:00'
     model_path_r = 'tests/data/model_eco.dill'
     model_path_w = 'tests/data/model_eco.dill'
+# Cenote and eeris are for use with internal datasets
 elif dataset == 'cenote':
     p = 'tests/data/pid7870cd27f3c_integration_20200113.csv'
     date_start = '2019-12-01T00:00'
@@ -230,7 +241,7 @@ ani = animation.FuncAnimation(fig, d, frames=d.data_gen,
                               fargs=None, blit=False, repeat=False,
                               save_count=sys.maxsize)
 if save:
-    save_file = 'demo_videos/' + dataset + \
+    save_file = video_out + dataset + \
         date_start + '_' + date_end + '.mp4'
     ani.save(save_file,
              progress_callback=lambda i, n: print(f'Saving frame {i} of {n}'))
