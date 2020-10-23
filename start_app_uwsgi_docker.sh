@@ -1,5 +1,7 @@
 #!/bin/bash
 
+# File used for deployment in docker container.
+
 # Optional. Switch to environment
 # source /usr/local/eeris/eeris/bin/activate
 
