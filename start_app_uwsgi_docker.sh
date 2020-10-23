@@ -10,6 +10,8 @@ if [ -z "$pid" ]; then
     mongo < ini/mini.js
 fi
 
+service nginx start
+
 # Launch uwsgi
 uwsgi /usr/local/eeris/eeris_nilm/ini/uwsgi.ini --reload-on-exception \
       > /var/log/uwsgi/eeris_nilm.stdout.log \
