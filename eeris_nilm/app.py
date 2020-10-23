@@ -110,10 +110,11 @@ def create_app(conf_file):
     api.add_route('/nilm/{inst_id}/appliance_name',
                   nilm, suffix='appliance_name')
     # Installation manager (for database management - limited functionality)
-    inst_ids = [x.strip() for x in config['eeRIS']['inst_ids'].split(",")]
-    inst_manager = eeris_nilm.installation.\
-        InstallationManager(mdb, inst_list=inst_ids)
-    api.add_route('/installation/{inst_id}/model', inst_manager, suffix='model')
+    # inst_ids = [x.strip() for x in config['eeRIS']['inst_ids'].split(",")]
+    # inst_manager = eeris_nilm.installation.\
+    #     InstallationManager(mdb, inst_list=inst_ids)
+    # api.add_route('/installation/{inst_id}/model', inst_manager,
+    # suffix='model')
     logging.debug("Ready")
     return api
 

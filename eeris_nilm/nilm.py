@@ -84,7 +84,7 @@ class NILM(object):
         thread = config['MQTT'].getboolean('thread')
         if thread:
             self._periodic_thread(period=3600)
-            # We want to be able to cancel this. If we don't remove this and
+            # We want to be able to cancel this. If we don't, remove this and
             # just make it a daemon thread.
             atexit.register(self._cancel_periodic_thread)
         if config['eeRIS']['input_method'] == 'mqtt':
@@ -212,6 +212,9 @@ class NILM(object):
         def on_message(client, userdata, message):
             x = message.topic.split('/')
             inst_id = x[1]
+            if not self._accept_inst(inst_id):
+                return
+
             msg = message.payload.decode('utf-8')
             # Convert message payload to pandas dataframe
             msg_d = json.loads(msg.replace('\'', '\"'))
