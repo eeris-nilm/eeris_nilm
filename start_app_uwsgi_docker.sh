@@ -11,4 +11,6 @@ if [ -z "$pid" ]; then
 fi
 
 # Launch uwsgi
-uwsgi /usr/local/eeris/eeris_nilm/ini/uwsgi.ini --reload-on-exception
+uwsgi /usr/local/eeris/eeris_nilm/ini/uwsgi.ini --reload-on-exception \
+      > /var/log/uwsgi/eeris_nilm.stdout.log \
+      2> /var/log/uwsgi/eeris_nilm.stderr.log
