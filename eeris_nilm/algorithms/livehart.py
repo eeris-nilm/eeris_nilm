@@ -47,7 +47,7 @@ class LiveHart(object):
     # little
 
     # ID for particular algorithm version
-    VERSION = "0.0"
+    VERSION = "0.1"
 
     # Some of the variables below could be parameters
     BUFFER_SIZE_SECONDS = 24 * 3600
@@ -790,6 +790,9 @@ class LiveHart(object):
                 # Increase display id for next appliance
                 self._appliance_display_id += 1
             else:
+                # TODO: Trigger notification if appliance is detected (Cluster
+                # X)
+                # TODO: Notification mechanism
                 # Match with previous and update signature with average
                 self.live.insert(0, candidates[0][0])
                 # 2x because we take both the rising and dropping edge

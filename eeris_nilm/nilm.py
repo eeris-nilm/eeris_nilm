@@ -42,7 +42,7 @@ class NILM(object):
     maintains a document of the state of appliances in an installation.
     """
 
-    # How often (every n PUT requests) should we store the model
+    # How often (after how many updates) should we store the model
     # persistently?
     STORE_PERIOD = 10
 
@@ -229,10 +229,10 @@ class NILM(object):
             # Submit for processing by the model
             with self._model_lock[inst_id]:
                 model = self._models[inst_id]
-                logging.debug('NILM lock (PUT)')
+                logging.debug('NILM lock (MQTT message)')
                 # Process the data
                 model.update(data)
-            logging.debug('NILM unlock (PUT)')
+            logging.debug('NILM unlock (MQTT message)')
             time.sleep(0.01)
             # Store data if needed
             self._put_count[inst_id] += 1
