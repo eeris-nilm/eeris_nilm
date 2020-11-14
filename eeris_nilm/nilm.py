@@ -495,7 +495,9 @@ class NILM(object):
                     "start": st,
                     "end": et
                 }
-                r = utils.request_with_retry(url, params, request='get')
+                self._orch_token = utils.get_jwt('nilm', self._orch_jwt_psk)
+                r = utils.request_with_retry(url, params, request='get',
+                                             token=self._orch_token)
                 data = utils.get_data_from_cenote_response(r)
                 if data is None:
                     continue
@@ -511,7 +513,9 @@ class NILM(object):
                 "start": st,
                 "end": et
             }
-            r = utils.request_with_retry(url, params, request='get')
+            self._orch_token = utils.get_jwt('nilm', self._orch_jwt_psk)
+            r = utils.request_with_retry(url, params, request='get',
+                                         token=self._orch_token)
             data = utils.get_data_from_cenote_response(r)
             rstep = 3
             for i in range(0, data.shape[0], rstep):
