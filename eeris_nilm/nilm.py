@@ -123,8 +123,10 @@ class NILM(object):
         list of json objects with the appliance activations for each
         installation. Keys of the dictionary are the installation ids.
         """
+        logging.debug("Sending activations")
         ret = {}
         for inst_id, model in self._models.items():
+            logging.debug("Activations for installation %s" % (inst_id))
             if inst_id not in self._model_lock.keys():
                 self._model_lock[inst_id] = threading.Lock()
             with self._model_lock[inst_id]:
@@ -176,6 +178,8 @@ class NILM(object):
                     ret[inst_id] = \
                         json.dumps(a.return_new_activations(update_ts=True))
                 # Move on to the next installation
+                logging.debug(
+                    "Done sending activations of installation %s" % (inst_id))
         return ret
 
     def _cancel_periodic_thread(self):
