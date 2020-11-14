@@ -58,7 +58,7 @@ class NILM(object):
         ConfigParser object with sections described in app.create_app()
 
         """
-        # Add state variables as needed
+        # Add state and configuration variables as needed
         self._mdb = mdb
         self._config = config
         self._models = dict()
@@ -70,27 +70,37 @@ class NILM(object):
         self._recomputation_thread = None
         self._mqtt_thread = None
         self._p_thread = None
+
+        # Configuration variables
+        # How are we receiving data
         self._input_method = config['eeRIS']['input_method']
+        # Installation ids that we accept for processing
         self._inst_list = \
             [x.strip() for x in config['eeRIS']['inst_ids'].split(",")]
-        self._jwt_psk = config['REST']['jwt_psk']
+        # Orchestrator JWT pre-shared key
+        self._orch_jwt_psk = config['orchestrator']['jwt_psk']
+        # Orchestrator URL
         orchestrator_url = config['orchestrator']['url']
-        # Where to send device activations
+        # Endpoint to send device activations
         self._activations_url = orchestrator_url + \
             config['orchestrator']['act_endpoint']
         # Recomputation data URL
         self._computations_url = orchestrator_url + \
             config['orchestrator']['comp_endpoint']
-        thread = config['MQTT'].getboolean('thread')
+        # Initialize thread for sending activation data periodically (if thread
+        # = True in the eeRIS configuration section)
+        thread = config['eeRIS'].getboolean('thread')
         if thread:
             self._periodic_thread(period=3600)
             # We want to be able to cancel this. If we don't, remove this and
             # just make it a daemon thread.
             atexit.register(self._cancel_periodic_thread)
+            logging.debug("Registered periodic thread")
         if config['eeRIS']['input_method'] == 'mqtt':
             self._mqtt_thread = threading.Thread(target=self._mqtt, name='mqtt',
                                                  daemon=True)
             self._mqtt_thread.start()
+            logging.debug("Registered mqtt thread")
 
     def _accept_inst(self, inst_id):
         if self._inst_list is None or inst_id in self._inst_list:
@@ -146,8 +156,12 @@ class NILM(object):
                 }
                 # Send stuff
                 if self._activations_url is not None:
+                    # Create a JWT for the orchestrator (alternatively, we can
+                    # do this only when token has expired)
+                    self._orch_token = utils.get_jwt('nilm', self._orch_jwt_psk)
                     resp = requests.post(self._activations_url,
-                                         json=json.dumps(body))
+                                         json=json.dumps(body),
+                                         headers={'Authorization': 'jwt %s' % (self._orch_token)})
                     if resp.status_code != falcon.HTTP_200:
                         logging.debug(
                             "Sending of activation data for %s failed: (%d, %s)"
@@ -192,7 +206,7 @@ class NILM(object):
         logging.debug("Activations report:")
         logging.debug(act_result)
         # Submit new thread
-        self._p_thread = threading.Timer(period, target=self._periodic_thread)
+        self._p_thread = threading.Timer(period, self._periodic_thread)
         self._p_thread.daemon = True
         self._p_thread.start()
 

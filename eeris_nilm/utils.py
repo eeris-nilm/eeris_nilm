@@ -18,6 +18,7 @@ import numpy as np
 import scipy
 import pandas as pd
 import json
+import jwt
 import requests
 import time
 
@@ -382,7 +383,7 @@ def get_data_from_cenote_response(resp):
     return data
 
 
-def request_with_retry(url, params, request='get', requests_limit=3600):
+def request_with_retry(url, params, request='get', requests_limit=3600, token=None):
     """
     Calls requests with parameters url and params. If it fails, it retries
     requests_limit times (with a sleep time of 1s in-between).
@@ -403,10 +404,10 @@ def request_with_retry(url, params, request='get', requests_limit=3600):
 
     while n_r < requests_limit:
         try:
-            if request == 'get':
-                r = f(url, params)
-            elif request == 'put':
-                r = f(url, params)
+            if token is not None:
+                f(url, params, headers={{'Authorization': 'jwt %s' % (token)}})
+            else:
+                f(url, params)
             break
         except requests.exceptions.RequestException as e:
             print("Request error: " + e)
@@ -417,3 +418,21 @@ def request_with_retry(url, params, request='get', requests_limit=3600):
             print("Retrying... %d / %d" % (n_r, requests_limit))
             time.sleep(1.0)
     return r
+
+# Other utilities
+
+
+def get_jwt(user, secret):
+    """
+    Helper that generates a JWT given a username and a secret.
+    """
+    now = datetime.utcnow()
+    payload = {
+        'user': user,
+        'iat': now,
+        'nbf': now,
+        'exp': now + timedelta(24*60*60)
+    }
+
+    jwt_token = jwt.encode(payload, secret, algorithm='HS256').decode('utf-8')
+    return jwt_token
