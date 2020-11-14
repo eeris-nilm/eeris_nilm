@@ -231,7 +231,14 @@ class NILM(object):
 
             msg = message.payload.decode('utf-8')
             # Convert message payload to pandas dataframe
-            msg_d = json.loads(msg.replace('\'', '\"'))
+            try:
+                msg_d = json.loads(msg.replace('\'', '\"'))
+            except:
+                logging.debug("Exception occurred while decoding message:")
+                logging.debug(msg)
+                logging.debug("Ignoring data")
+                return
+
             data = pd.DataFrame(msg_d, index=[0])
             data.rename(columns={"ts": "timestamp", "p": "active",
                                  "q": "reactive", "i": "current",
