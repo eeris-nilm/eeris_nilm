@@ -21,6 +21,7 @@ import json
 import jwt
 import requests
 import time
+from datetime import datetime, timedelta
 
 
 def get_segments(signal, mask, only_true=True):
@@ -405,7 +406,7 @@ def request_with_retry(url, params, request='get', requests_limit=3600, token=No
     while n_r < requests_limit:
         try:
             if token is not None:
-                f(url, params, headers={{'Authorization': 'jwt %s' % (token)}})
+                f(url, params, headers={'Authorization': 'jwt %s' % (token)})
             else:
                 f(url, params)
             break

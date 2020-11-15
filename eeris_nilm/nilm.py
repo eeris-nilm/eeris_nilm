@@ -209,11 +209,11 @@ class NILM(object):
         # Send activations
         try:
             act_result = self._send_activations()
+            logging.debug("Activations report:")
+            logging.debug(act_result)
         except:
             logging.debug("Sending of activations failed")
             # Continue
-        logging.debug("Activations report:")
-        logging.debug(act_result)
         # Submit new thread
         self._p_thread = threading.Timer(period, self._periodic_thread)
         self._p_thread.daemon = True
