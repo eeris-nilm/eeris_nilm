@@ -16,6 +16,7 @@ limitations under the License.
 
 import falcon
 import pandas as pd
+import numpy as np
 import datetime as dt
 import dill
 import json
@@ -276,7 +277,7 @@ class NILM(object):
         port = int(self._config['MQTT']['port'])
         topic_prefix = self._config['MQTT']['topic_prefix']
         if self._config['MQTT']['identity'] == "random":
-            identity = "nilm" + int(np.random.rand() * 10000)
+            identity = "nilm" + str(int(np.random.rand() * 1000000))
         else:
             identity = self._config['MQTT']['identity']
         client = mqtt.Client(identity, clean_session=False)
