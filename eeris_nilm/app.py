@@ -59,7 +59,8 @@ def create_app(conf_file):
     ca_key = /path/to/CA.crt # Certificate Authority path
     client_pass = [secret] # Client key passphrase
     topic_prefix = eeris # mqtt topic prefix to subscribe
-    identity = eeris_nilm_local # Identity for mqtt client
+    identity = eeris_nilm_local # Identity for mqtt client. If "random" then a
+                                # random client identity is generated each time
 
     [orchestrator]
     url = [url] # eeRIS orchestrator URL

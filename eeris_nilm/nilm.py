@@ -206,7 +206,11 @@ class NILM(object):
             # Wait 5 minutes, in case clustering is completed within this time.
             time.sleep(300)
         # Send activations
-        act_result = self._send_activations()
+        try:
+            act_result = self._send_activations()
+        except:
+            logging.debug("Sending of activations failed")
+            # Continue
         logging.debug("Activations report:")
         logging.debug(act_result)
         # Submit new thread
@@ -271,7 +275,10 @@ class NILM(object):
         broker = self._config['MQTT']['broker']
         port = int(self._config['MQTT']['port'])
         topic_prefix = self._config['MQTT']['topic_prefix']
-        identity = self._config['MQTT']['identity']
+        if self._config['MQTT']['identity'] == "random":
+            identity = "nilm" + int(np.random.rand() * 10000)
+        else:
+            identity = self._config['MQTT']['identity']
         client = mqtt.Client(identity, clean_session=False)
         client.tls_set(ca_certs=ca, keyfile=key, certfile=crt)
         client.tls_insecure_set(True)
