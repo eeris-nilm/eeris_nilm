@@ -222,6 +222,35 @@ class NILM(object):
         self._p_thread.daemon = True
         self._p_thread.start()
 
+    def _handle_notifications(self, model):
+        """
+        Helper function to assist in sending of notifications to the
+        orchestrator, when unnamed appliances are detected.
+        """
+        if model.detected_appliance is None:
+            # No appliance was detected, do nothing
+            return
+        
+        body = {
+            "_id": model.detected_appliance.appliance_id,
+            "name": model.detected_appliance.name,
+            "type": model.detected_appliance.category,
+            "status": "true"
+        }
+        # TODO: Only when expired?
+        self._orch_token = utils.get_jwt('nilm', self._orch_jwt_psk)
+        resp = requests.post(self._notifications_url + 'newdevice',
+                             data=json.dumps(body),
+                             headers={'Authorization': 'jwt %s' % (self._orch_token)})
+        if resp.status_code != falcon.HTTP_200:
+            logging.debug(
+                "Sending of notification data for %s failed: (%d, %s)"
+                % (inst_id, resp.status_code, resp.text)
+            )
+            logging.debug("Request body:")
+            logging.debug("%s" % (json.dumps(body)))
+        
+
     def _mqtt(self):
         """
         Thread for data acquisition from the mqtt broker.
@@ -268,25 +297,7 @@ class NILM(object):
             logging.debug('NILM unlock (MQTT message)')
             time.sleep(0.01)
             # Notify orchestrator for appliance detection
-            if model.detected_appliance is not None:
-                body = {
-                    "_id": model.detected_appliance.appliance_id,
-                    "name": model.detected_appliance.name,
-                    "type": model.detected_appliance.category,
-                    "status": "true"
-                }
-                # TODO: Only when expired?
-                self._orch_token = utils.get_jwt('nilm', self._orch_jwt_psk)
-                resp = requests.post(self._notifications_url + 'newdevice',
-                                     data=json.dumps(body),
-                                     headers={'Authorization': 'jwt %s' % (self._orch_token)})
-                if resp.status_code != falcon.HTTP_200:
-                    logging.debug(
-                        "Sending of notification data for %s failed: (%d, %s)"
-                        % (inst_id, resp.status_code, resp.text)
-                    )
-                    logging.debug("Request body:")
-                    logging.debug("%s" % (json.dumps(body)))
+            self._handle_notifications(model)
             self._put_count[inst_id] += 1
             if (self._put_count[inst_id] % self.STORE_PERIOD == 0):
                 # Persistent storage
@@ -644,9 +655,7 @@ class NILM(object):
             model.update(data)
         logging.debug('NILM unlock (PUT)')
         time.sleep(0.01)
-        if model.detected_appliance is not None:
-            # TODO: Send notification to orchestrator
-            # Store data if needed, and prepare response.
+        self._handle_notifications(model)
         self._put_count[inst_id] += 1
         if (self._put_count[inst_id] % self.STORE_PERIOD == 0):
             # Persistent storage
