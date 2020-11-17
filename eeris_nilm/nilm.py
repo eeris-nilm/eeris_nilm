@@ -88,6 +88,8 @@ class NILM(object):
         # Recomputation data URL
         self._computations_url = orchestrator_url + \
             config['orchestrator']['comp_endpoint']
+        self._notifications_url = orchestrator_url + \
+            config['orchestrator']['notif_endpoint']
         # Initialize thread for sending activation data periodically (if thread
         # = True in the eeRIS configuration section)
         thread = config['eeRIS'].getboolean('thread')
@@ -162,8 +164,9 @@ class NILM(object):
                     # Create a JWT for the orchestrator (alternatively, we can
                     # do this only when token has expired)
                     self._orch_token = utils.get_jwt('nilm', self._orch_jwt_psk)
+                    # Change data= to json= depending on the orchestrator setup
                     resp = requests.post(self._activations_url,
-                                         json=json.dumps(body),
+                                         data=json.dumps(body),
                                          headers={'Authorization': 'jwt %s' % (self._orch_token)})
                     if resp.status_code != falcon.HTTP_200:
                         logging.debug(
@@ -264,12 +267,30 @@ class NILM(object):
                 model.update(data)
             logging.debug('NILM unlock (MQTT message)')
             time.sleep(0.01)
-            # Store data if needed
+            # Notify orchestrator for appliance detection
+            if model.detected_appliance is not None:
+                body = {
+                    "_id": model.detected_appliance.appliance_id,
+                    "name": model.detected_appliance.name,
+                    "type": model.detected_appliance.category,
+                    "status": "true"
+                }
+                # TODO: Only when expired?
+                self._orch_token = utils.get_jwt('nilm', self._orch_jwt_psk)
+                resp = requests.post(self._notifications_url + 'newdevice',
+                                     data=json.dumps(body),
+                                     headers={'Authorization': 'jwt %s' % (self._orch_token)})
+                if resp.status_code != falcon.HTTP_200:
+                    logging.debug(
+                        "Sending of notification data for %s failed: (%d, %s)"
+                        % (inst_id, resp.status_code, resp.text)
+                    )
+                    logging.debug("Request body:")
+                    logging.debug("%s" % (json.dumps(body)))
             self._put_count[inst_id] += 1
             if (self._put_count[inst_id] % self.STORE_PERIOD == 0):
                 # Persistent storage
                 self._store_model(inst_id)
-
         ca = self._config['MQTT']['ca']
         key = self._config['MQTT']['key']
         crt = self._config['MQTT']['crt']
@@ -515,7 +536,8 @@ class NILM(object):
                     "end": et
                 }
                 self._orch_token = utils.get_jwt('nilm', self._orch_jwt_psk)
-                r = utils.request_with_retry(url, params, request='get',
+                r = utils.request_with_retry(url, data=json.dumps(params),
+                                             request='get',
                                              token=self._orch_token)
                 data = utils.get_data_from_cenote_response(r)
                 if data is None:
@@ -622,7 +644,9 @@ class NILM(object):
             model.update(data)
         logging.debug('NILM unlock (PUT)')
         time.sleep(0.01)
-        # Store data if needed, and prepare response.
+        if model.detected_appliance is not None:
+            # TODO: Send notification to orchestrator
+            # Store data if needed, and prepare response.
         self._put_count[inst_id] += 1
         if (self._put_count[inst_id] % self.STORE_PERIOD == 0):
             # Persistent storage
@@ -783,6 +807,7 @@ class NILM(object):
         created. Expects parameters appliance_id, name and category, all
         strings.
         """
+        # TODO: Also update live appliance
         if not self._accept_inst(inst_id):
             resp.status = falcon.HTTP_400
             resp.body = "Installation not in list for this NILM instance."

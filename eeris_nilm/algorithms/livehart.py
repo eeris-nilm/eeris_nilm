@@ -161,6 +161,9 @@ class LiveHart(object):
         self._store_live = store_live
         self.live_history = pd.DataFrame([], columns=['start', 'end', 'name',
                                                       'active', 'reactive'])
+        # Variable to trigger potential applicance naming notifications to the
+        # end-users. It stores the detected appliances that were activated for naming
+        self.detected_appliance = None
 
         # Other variables - needed for sanity checks
         self.background_active = self.LARGE_POWER
@@ -792,7 +795,6 @@ class LiveHart(object):
             else:
                 # TODO: Trigger notification if appliance is detected (Cluster
                 # X)
-                # TODO: Notification mechanism
                 # Match with previous and update signature with average
                 self.live.insert(0, candidates[0][0])
                 # 2x because we take both the rising and dropping edge
@@ -801,6 +803,12 @@ class LiveHart(object):
                 s_a = a.signature[0, :]
                 avg_power = n / (n + 1.0) * s + 1.0 / (n + 1.0) * s_a
                 self.live[0].signature[0, :] = avg_power
+                # Register detection to support notifications to the users for
+                # appliance naming.
+                self.detected_appliance = None
+                # TODO: Restrict to unknown category only?
+                if not candidates[0][0].live:
+                    self.detected_appliance = candidates[0][0]
             # For activations
             self.live[0].start_ts = self._edge_start_ts
             # Done

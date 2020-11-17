@@ -384,10 +384,12 @@ def get_data_from_cenote_response(resp):
     return data
 
 
-def request_with_retry(url, params, request='get', requests_limit=3600, token=None):
+def request_with_retry(url, params=None, data=None, json=None, request='get',
+                       requests_limit=3600, token=None):
     """
-    Calls requests with parameters url and params. If it fails, it retries
-    requests_limit times (with a sleep time of 1s in-between).
+    Calls requests with parameters url and params, data or json (whichever is
+    not None). If it fails, it retries requests_limit times (with a sleep time
+    of 1s in-between).
     """
     n_r = 0
     f = None
@@ -403,12 +405,18 @@ def request_with_retry(url, params, request='get', requests_limit=3600, token=No
         raise ValueError("Current implementation does not handle %s requests",
                          request)
 
+    args = {}
+    if data is not None:
+        args['data'] = data
+    if json is not None:
+        args['json'] = json
+
     while n_r < requests_limit:
         try:
             if token is not None:
-                f(url, params, headers={'Authorization': 'jwt %s' % (token)})
+                r = f(url, params, **args, headers={'Authorization': 'jwt %s' % (token)})
             else:
-                f(url, params)
+                r = f(url, params, **args)
             break
         except requests.exceptions.RequestException as e:
             print("Request error: " + e)
