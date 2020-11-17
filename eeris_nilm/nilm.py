@@ -588,6 +588,7 @@ class NILM(object):
         if not self._accept_inst(inst_id):
             resp.status = falcon.HTTP_400
             resp.body = "Installation not in list for this NILM instance."
+            logging.info(("Rejected request for installation %s") % (inst_id))
             return
 
         if inst_id not in self._model_lock.keys():
@@ -596,6 +597,7 @@ class NILM(object):
             model = self._load_model(inst_id)
             logging.debug('NILM lock (GET)')
             resp.body = self._prepare_response_body(model)
+            logging.debug('Response body: %s' % (resp.body))
         logging.debug('NILM unlock (GET)')
         time.sleep(0.01)
         resp.status = falcon.HTTP_200
@@ -612,16 +614,19 @@ class NILM(object):
         if not self._accept_inst(inst_id):
             resp.status = falcon.HTTP_400
             resp.body = "Installation not in list for this NILM instance."
+            logging.info(("Rejected request for installation %s") % (inst_id))
             return
         if self._input_method != 'rest':
             resp.status = falcon.HTTP_405
-            resp.body = "PUT method not allows when operating" + \
+            resp.body = "PUT method not allowed when operating" + \
                 "outside 'REST' mode"
+            logging.info("Attempted to call PUT method outside \'REST\' mode")
             return
 
         if req.content_length:
             data = pd.read_json(req.stream)
         else:
+            logging.info("No data provided")
             raise falcon.HTTPBadRequest("No data provided", "No data provided")
         # Load or create the model, if not available
         if (inst_id not in self._models.keys()):
@@ -646,6 +651,7 @@ class NILM(object):
         if self._recomputation_active[inst_id]:
             resp.status = falcon.HTTP_204
             resp.body = "Model recomputation in progress, send data again later"
+            logging.info("Received request while model recomputation is in progress")
             return
         if inst_id not in self._model_lock.keys():
             self._model_lock[inst_id] = threading.Lock()
