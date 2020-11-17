@@ -837,7 +837,16 @@ class NILM(object):
             prev_category = model.appliances[appliance_id].category
             model.appliances[appliance_id].name = name
             model.appliances[appliance_id].category = category
-            model.appliances[appliance_id].verifyied = True
+            model.appliances[appliance_id].verified = True
+            # Also update live appliance
+            live_idx = next(item for item in model.live if
+                            item['appliance_id'] == appliance_id)
+            if live_idx is None:
+                logging.debug("Appliance id %s not in list of live appliances")
+            else:
+                model.live[live_idx].name = name
+                model.live[live_idx].category = category
+                model.live[live_idx].verified = True
             logging.debug(("Installation: %s. Renamed appliance "
                            "%s from %s with "
                            "category %s to %s with category %s") %
