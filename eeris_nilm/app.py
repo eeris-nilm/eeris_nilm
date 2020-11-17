@@ -77,7 +77,7 @@ def create_app(conf_file):
     config.read(conf_file)
 
     # DB connection
-    logging.debug("Connecting to database")
+    logging.info("Connecting to database")
     mclient = pymongo.MongoClient(config['eeRIS']['dburl'])
     dbname = config['eeRIS']['dbname']
     dblist = mclient.list_database_names()
@@ -100,7 +100,7 @@ def create_app(conf_file):
     # api = falcon.API()
 
     # NILM
-    logging.debug("Setting up connections")
+    logging.info("Setting up connections")
     nilm = eeris_nilm.nilm.NILM(mdb, config)
     api.add_route('/nilm/{inst_id}', nilm)
     api.add_route('/nilm/{inst_id}/clustering', nilm, suffix='clustering')
@@ -116,7 +116,7 @@ def create_app(conf_file):
     #     InstallationManager(mdb, inst_list=inst_ids)
     # api.add_route('/installation/{inst_id}/model', inst_manager,
     # suffix='model')
-    logging.debug("Ready")
+    logging.info("Ready")
     return api
 
 

@@ -412,9 +412,6 @@ class NILM(object):
             for k in body_d['payload']:
                 logging.error(body_d[k])
             raise
-
-        # For debugging only (use of logging package not necessary)
-        print(body)
         return body
 
     def _prepare_response_body_debug(self, model, lret=5):

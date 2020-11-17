@@ -168,8 +168,9 @@ class LiveHart(object):
         # Other variables - needed for sanity checks
         self.background_active = self.LARGE_POWER
         self._background_last_update = None
+        self._count_bg_overestimation = 0
         self.residual_live = np.array([0.0, 0.0])
-        self._count_overestimation = 0
+        self._count_res_overestimation = 0
 
         # Variables for handling threads. For now, just a lock.
         self._clustering_thread = None
@@ -1009,12 +1010,12 @@ class LiveHart(object):
             # been switched off. Heuristic solution here.
             # self.live = []
             # self.residual_live = self.running_avg_power
-            self._count_overestimation += 1
-            if self._count_overestimation > self.OVERESTIMATION_SECONDS:
+            self._count_res_overestimation += 1
+            if self._count_res_overestimation > self.OVERESTIMATION_SECONDS:
                 self.live = []
                 total_estimated = self.background_active
         else:
-            self._count_overestimation = 0
+            self._count_res_overestimation = 0
         self.residual_live = self.running_avg_power - total_estimated
         if self.residual_live[0] < 0:
             logging.info(("Something's wrong with the residual estimation:"
@@ -1053,11 +1054,15 @@ class LiveHart(object):
                 return
         # Hard way of dealing with discrepancies: Reset background
         if self.background_active > self.running_avg_power[0]:
-            logging.info(("Something's wrong with the background estimation:"
-                           "Background: %f, Residual: %f") %
-                          (self.background_active, self.residual_live[0]))
-            self.background_active = self.LARGE_POWER
-            self._background_last_update = None
+            self._count_bg_overestimation += 1
+            if self._count_bg_overestimation > self.OVERESTIMATION_SECONDS:
+                logging.warning(("Something's wrong with the background estimation:"
+                                 "Background: %f, Residual: %f") %
+                                (self.background_active, self.residual_live[0]))
+                self.background_active = self.LARGE_POWER
+                self._background_last_update = None
+        else:
+            self._count_bg_overestimation = 0
 
     def _guess_type(self):
         """
