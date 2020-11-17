@@ -376,7 +376,6 @@ class NILM(object):
             app_d = {"_id": '000000000000000000000001',
                      "name": "Background",
                      "type": "background",
-                     "status": True,
                      "active": model.background_active,
                      "reactive": 0.0}
             d = {"data": app_d, "timestamp": ts}
@@ -386,7 +385,6 @@ class NILM(object):
             app_d = {"_id": app.appliance_id,
                      "name": app.name,
                      "type": app.category,
-                     "status": True,
                      "active": app.signature[0, 0],
                      "reactive": app.signature[0, 1]}
             d = {"data": app_d, "timestamp": ts}
@@ -396,7 +394,6 @@ class NILM(object):
             app_d = {"_id": '000000000000000000000002',
                      "name": "Other",
                      "type": "residual",
-                     "status": True,
                      "active": model.residual_live[0],
                      "reactive": model.residual_live[1]}
             d = {"data": app_d, "timestamp": ts}
