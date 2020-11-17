@@ -239,13 +239,13 @@ class NILM(object):
         }
         # TODO: Only when expired?
         self._orch_token = utils.get_jwt('nilm', self._orch_jwt_psk)
-        resp = requests.post(self._notifications_url + 'newdevice',
+        resp = requests.post(self._notifications_url + '/newdevice',
                              data=json.dumps(body),
                              headers={'Authorization': 'jwt %s' % (self._orch_token)})
         if resp.status_code != falcon.HTTP_200:
             logging.error(
                 "Sending of notification data for %s failed: (%d, %s)"
-                % (inst_id, resp.status_code, resp.text)
+                % (model.installation_id, resp.status_code, resp.text)
             )
             logging.error("Request body:")
             logging.error("%s" % (json.dumps(body)))
