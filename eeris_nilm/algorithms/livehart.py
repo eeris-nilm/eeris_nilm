@@ -445,7 +445,7 @@ class LiveHart(object):
                 # Has the appliance already been mapped?
                 # TODO: This is a hack. Better solutions? Is this an edge case?
                 if m in mapped_keys:
-                    logging.DEBUG(("Appliance %s (%s) already mapped, ignoring"
+                    logging.debug(("Appliance %s (%s) already mapped, ignoring"
                                    "mapping of %s") %
                                   (a_new[m].name, m,
                                    self.appliances_live[k].name),
@@ -1017,7 +1017,7 @@ class LiveHart(object):
             self._count_overestimation = 0
         self.residual_live = self.running_avg_power - total_estimated
         if self.residual_live[0] < 0:
-            logging.debug(("Something's wrong with the residual estimation:"
+            logging.info(("Something's wrong with the residual estimation:"
                            "Background: %f, Residual: %f") %
                           (self.background_active, self.residual_live[0]))
             self.residual_live[0] = 0.0
@@ -1053,7 +1053,7 @@ class LiveHart(object):
                 return
         # Hard way of dealing with discrepancies: Reset background
         if self.background_active > self.running_avg_power[0]:
-            logging.debug(("Something's wrong with the background estimation:"
+            logging.info(("Something's wrong with the background estimation:"
                            "Background: %f, Residual: %f") %
                           (self.background_active, self.residual_live[0]))
             self.background_active = self.LARGE_POWER
