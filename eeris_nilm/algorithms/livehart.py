@@ -161,12 +161,16 @@ class LiveHart(object):
         self._store_live = store_live
         self.live_history = pd.DataFrame([], columns=['start', 'end', 'name',
                                                       'active', 'reactive'])
+        # Variable to trigger potential applicance naming notifications to the
+        # end-users. It stores the detected appliances that were activated for naming
+        self.detected_appliance = None
 
         # Other variables - needed for sanity checks
         self.background_active = self.LARGE_POWER
         self._background_last_update = None
+        self._count_bg_overestimation = 0
         self.residual_live = np.array([0.0, 0.0])
-        self._count_overestimation = 0
+        self._count_res_overestimation = 0
 
         # Variables for handling threads. For now, just a lock.
         self._clustering_thread = None
@@ -442,7 +446,7 @@ class LiveHart(object):
                 # Has the appliance already been mapped?
                 # TODO: This is a hack. Better solutions? Is this an edge case?
                 if m in mapped_keys:
-                    logging.DEBUG(("Appliance %s (%s) already mapped, ignoring"
+                    logging.debug(("Appliance %s (%s) already mapped, ignoring"
                                    "mapping of %s") %
                                   (a_new[m].name, m,
                                    self.appliances_live[k].name),
@@ -792,7 +796,6 @@ class LiveHart(object):
             else:
                 # TODO: Trigger notification if appliance is detected (Cluster
                 # X)
-                # TODO: Notification mechanism
                 # Match with previous and update signature with average
                 self.live.insert(0, candidates[0][0])
                 # 2x because we take both the rising and dropping edge
@@ -801,6 +804,12 @@ class LiveHart(object):
                 s_a = a.signature[0, :]
                 avg_power = n / (n + 1.0) * s + 1.0 / (n + 1.0) * s_a
                 self.live[0].signature[0, :] = avg_power
+                # Register detection to support notifications to the users for
+                # appliance naming.
+                self.detected_appliance = None
+                # TODO: Restrict to unknown category only?
+                if not candidates[0][0].live:
+                    self.detected_appliance = candidates[0][0]
             # For activations
             self.live[0].start_ts = self._edge_start_ts
             # Done
@@ -1001,15 +1010,15 @@ class LiveHart(object):
             # been switched off. Heuristic solution here.
             # self.live = []
             # self.residual_live = self.running_avg_power
-            self._count_overestimation += 1
-            if self._count_overestimation > self.OVERESTIMATION_SECONDS:
+            self._count_res_overestimation += 1
+            if self._count_res_overestimation > self.OVERESTIMATION_SECONDS:
                 self.live = []
                 total_estimated = self.background_active
         else:
-            self._count_overestimation = 0
+            self._count_res_overestimation = 0
         self.residual_live = self.running_avg_power - total_estimated
         if self.residual_live[0] < 0:
-            logging.debug(("Something's wrong with the residual estimation:"
+            logging.info(("Something's wrong with the residual estimation:"
                            "Background: %f, Residual: %f") %
                           (self.background_active, self.residual_live[0]))
             self.residual_live[0] = 0.0
@@ -1045,11 +1054,15 @@ class LiveHart(object):
                 return
         # Hard way of dealing with discrepancies: Reset background
         if self.background_active > self.running_avg_power[0]:
-            logging.debug(("Something's wrong with the background estimation:"
-                           "Background: %f, Residual: %f") %
-                          (self.background_active, self.residual_live[0]))
-            self.background_active = self.LARGE_POWER
-            self._background_last_update = None
+            self._count_bg_overestimation += 1
+            if self._count_bg_overestimation > self.OVERESTIMATION_SECONDS:
+                logging.warning(("Something's wrong with the background estimation:"
+                                 "Background: %f, Residual: %f") %
+                                (self.background_active, self.residual_live[0]))
+                self.background_active = self.LARGE_POWER
+                self._background_last_update = None
+        else:
+            self._count_bg_overestimation = 0
 
     def _guess_type(self):
         """

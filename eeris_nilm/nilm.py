@@ -16,6 +16,7 @@ limitations under the License.
 
 import falcon
 import pandas as pd
+import numpy as np
 import datetime as dt
 import dill
 import json
@@ -58,7 +59,7 @@ class NILM(object):
         ConfigParser object with sections described in app.create_app()
 
         """
-        # Add state variables as needed
+        # Add state and configuration variables as needed
         self._mdb = mdb
         self._config = config
         self._models = dict()
@@ -70,33 +71,45 @@ class NILM(object):
         self._recomputation_thread = None
         self._mqtt_thread = None
         self._p_thread = None
+
+        # Configuration variables
+        # How are we receiving data
         self._input_method = config['eeRIS']['input_method']
+        # Installation ids that we accept for processing
         self._inst_list = \
             [x.strip() for x in config['eeRIS']['inst_ids'].split(",")]
-        self._jwt_psk = config['REST']['jwt_psk']
+        # Orchestrator JWT pre-shared key
+        self._orch_jwt_psk = config['orchestrator']['jwt_psk']
+        # Orchestrator URL
         orchestrator_url = config['orchestrator']['url']
-        # Where to send device activations
+        # Endpoint to send device activations
         self._activations_url = orchestrator_url + \
             config['orchestrator']['act_endpoint']
         # Recomputation data URL
         self._computations_url = orchestrator_url + \
             config['orchestrator']['comp_endpoint']
-        thread = config['MQTT'].getboolean('thread')
+        self._notifications_url = orchestrator_url + \
+            config['orchestrator']['notif_endpoint']
+        # Initialize thread for sending activation data periodically (if thread
+        # = True in the eeRIS configuration section)
+        thread = config['eeRIS'].getboolean('thread')
         if thread:
             self._periodic_thread(period=3600)
             # We want to be able to cancel this. If we don't, remove this and
             # just make it a daemon thread.
             atexit.register(self._cancel_periodic_thread)
+            logging.info("Registered periodic thread")
         if config['eeRIS']['input_method'] == 'mqtt':
             self._mqtt_thread = threading.Thread(target=self._mqtt, name='mqtt',
                                                  daemon=True)
             self._mqtt_thread.start()
+            logging.info("Registered mqtt thread")
 
     def _accept_inst(self, inst_id):
         if self._inst_list is None or inst_id in self._inst_list:
             return True
         else:
-            logging.debug(("Received installation id %s which is not in list."
+            logging.warning(("Received installation id %s which is not in list."
                            "Ignoring.") % (inst_id))
             return False
 
@@ -113,8 +126,10 @@ class NILM(object):
         list of json objects with the appliance activations for each
         installation. Keys of the dictionary are the installation ids.
         """
+        logging.info("Sending activations")
         ret = {}
         for inst_id, model in self._models.items():
+            logging.debug("Activations for installation %s" % (inst_id))
             if inst_id not in self._model_lock.keys():
                 self._model_lock[inst_id] = threading.Lock()
             with self._model_lock[inst_id]:
@@ -146,10 +161,15 @@ class NILM(object):
                 }
                 # Send stuff
                 if self._activations_url is not None:
+                    # Create a JWT for the orchestrator (alternatively, we can
+                    # do this only when token has expired)
+                    self._orch_token = utils.get_jwt('nilm', self._orch_jwt_psk)
+                    # Change data= to json= depending on the orchestrator setup
                     resp = requests.post(self._activations_url,
-                                         json=json.dumps(body))
+                                         data=json.dumps(body),
+                                         headers={'Authorization': 'jwt %s' % (self._orch_token)})
                     if resp.status_code != falcon.HTTP_200:
-                        logging.debug(
+                        logging.error(
                             "Sending of activation data for %s failed: (%d, %s)"
                             % (inst_id, resp.status_code, resp.text)
                         )
@@ -162,6 +182,8 @@ class NILM(object):
                     ret[inst_id] = \
                         json.dumps(a.return_new_activations(update_ts=True))
                 # Move on to the next installation
+                logging.debug(
+                    "Done sending activations of installation %s" % (inst_id))
         return ret
 
     def _cancel_periodic_thread(self):
@@ -182,19 +204,52 @@ class NILM(object):
         clustering : bool
         Perform clustering or not.
         """
-        logging.debug("Starting periodic thread.")
+        logging.info("Starting periodic thread.")
         if clustering:
             self.perform_clustering()
             # Wait 5 minutes, in case clustering is completed within this time.
             time.sleep(300)
         # Send activations
-        act_result = self._send_activations()
-        logging.debug("Activations report:")
-        logging.debug(act_result)
+        try:
+            act_result = self._send_activations()
+            logging.debug("Activations report:")
+            logging.debug(act_result)
+        except:
+            logging.error("Sending of activations failed!")
+            # Continue
         # Submit new thread
-        self._p_thread = threading.Timer(period, target=self._periodic_thread)
+        self._p_thread = threading.Timer(period, self._periodic_thread)
         self._p_thread.daemon = True
         self._p_thread.start()
+
+    def _handle_notifications(self, model):
+        """
+        Helper function to assist in sending of notifications to the
+        orchestrator, when unnamed appliances are detected.
+        """
+        if model.detected_appliance is None:
+            # No appliance was detected, do nothing
+            return
+        
+        body = {
+            "_id": model.detected_appliance.appliance_id,
+            "name": model.detected_appliance.name,
+            "type": model.detected_appliance.category,
+            "status": "true"
+        }
+        # TODO: Only when expired?
+        self._orch_token = utils.get_jwt('nilm', self._orch_jwt_psk)
+        resp = requests.post(self._notifications_url + '/newdevice',
+                             data=json.dumps(body),
+                             headers={'Authorization': 'jwt %s' % (self._orch_token)})
+        if resp.status_code != falcon.HTTP_200:
+            logging.error(
+                "Sending of notification data for %s failed: (%d, %s)"
+                % (model.installation_id, resp.status_code, resp.text)
+            )
+            logging.error("Request body:")
+            logging.error("%s" % (json.dumps(body)))
+        
 
     def _mqtt(self):
         """
@@ -217,7 +272,14 @@ class NILM(object):
 
             msg = message.payload.decode('utf-8')
             # Convert message payload to pandas dataframe
-            msg_d = json.loads(msg.replace('\'', '\"'))
+            try:
+                msg_d = json.loads(msg.replace('\'', '\"'))
+            except:
+                logging.error("Exception occurred while decoding message:")
+                logging.error(msg)
+                logging.error("Ignoring data")
+                return
+
             data = pd.DataFrame(msg_d, index=[0])
             data.rename(columns={"ts": "timestamp", "p": "active",
                                  "q": "reactive", "i": "current",
@@ -234,19 +296,22 @@ class NILM(object):
                 model.update(data)
             logging.debug('NILM unlock (MQTT message)')
             time.sleep(0.01)
-            # Store data if needed
+            # Notify orchestrator for appliance detection
+            self._handle_notifications(model)
             self._put_count[inst_id] += 1
             if (self._put_count[inst_id] % self.STORE_PERIOD == 0):
                 # Persistent storage
                 self._store_model(inst_id)
-
         ca = self._config['MQTT']['ca']
         key = self._config['MQTT']['key']
         crt = self._config['MQTT']['crt']
         broker = self._config['MQTT']['broker']
         port = int(self._config['MQTT']['port'])
         topic_prefix = self._config['MQTT']['topic_prefix']
-        identity = self._config['MQTT']['identity']
+        if self._config['MQTT']['identity'] == "random":
+            identity = "nilm" + str(int(np.random.rand() * 1000000))
+        else:
+            identity = self._config['MQTT']['identity']
         client = mqtt.Client(identity, clean_session=False)
         client.tls_set(ca_certs=ca, keyfile=key, certfile=crt)
         client.tls_insecure_set(True)
@@ -341,14 +406,12 @@ class NILM(object):
         try:
             body = json.dumps(body_d)
         except (ValueError, TypeError):
-            logging.debug(body_d['installation_id'])
-            logging.debug(body_d['payload'])
+            logging.error("Error while preparing response body:")
+            logging.error(body_d['installation_id'])
+            logging.error(body_d['payload'])
             for k in body_d['payload']:
-                logging.debug(body_d[k])
+                logging.error(body_d[k])
             raise
-
-        # For debugging only (use of logging package not necessary)
-        print(body)
         return body
 
     def _prepare_response_body_debug(self, model, lret=5):
@@ -437,8 +500,8 @@ class NILM(object):
         """
         # TODO: Take into account naming events in the model
         if self._computations_url is None:
-            logging.debug(("No URL has been provided for past data.",
-                           "Model re-computation is not supported."))
+            logging.warning(("No URL has been provided for past data.",
+                             "Model re-computation is not supported."))
             return
         if inst_id not in self._model_lock.keys():
             self._model_lock[inst_id] = threading.Lock()
@@ -450,9 +513,9 @@ class NILM(object):
             result = self._mdb.models.delete_many({'meterId': inst_id})
             dcount = int(result.deleted_count)
             if dcount == 0:
-                logging.debug("Installation did not exist in the database")
+                logging.warning("Installation does not exist in the database")
             elif dcount > 1:
-                logging.debug("More than one documents deleted in database")
+                logging.warning("More than one documents deleted in database")
             # Prepare new model
             modelstr = dill.dumps(livehart.LiveHart(installation_id=inst_id))
             inst_doc = {'meterId': inst_id,
@@ -481,7 +544,10 @@ class NILM(object):
                     "start": st,
                     "end": et
                 }
-                r = utils.request_with_retry(url, params, request='get')
+                self._orch_token = utils.get_jwt('nilm', self._orch_jwt_psk)
+                r = utils.request_with_retry(url, data=json.dumps(params),
+                                             request='get',
+                                             token=self._orch_token)
                 data = utils.get_data_from_cenote_response(r)
                 if data is None:
                     continue
@@ -497,7 +563,9 @@ class NILM(object):
                 "start": st,
                 "end": et
             }
-            r = utils.request_with_retry(url, params, request='get')
+            self._orch_token = utils.get_jwt('nilm', self._orch_jwt_psk)
+            r = utils.request_with_retry(url, params, request='get',
+                                         token=self._orch_token)
             data = utils.get_data_from_cenote_response(r)
             rstep = 3
             for i in range(0, data.shape[0], rstep):
@@ -517,6 +585,7 @@ class NILM(object):
         if not self._accept_inst(inst_id):
             resp.status = falcon.HTTP_400
             resp.body = "Installation not in list for this NILM instance."
+            logging.info(("Rejected request for installation %s") % (inst_id))
             return
 
         if inst_id not in self._model_lock.keys():
@@ -525,6 +594,7 @@ class NILM(object):
             model = self._load_model(inst_id)
             logging.debug('NILM lock (GET)')
             resp.body = self._prepare_response_body(model)
+            logging.debug('Response body: %s' % (resp.body))
         logging.debug('NILM unlock (GET)')
         time.sleep(0.01)
         resp.status = falcon.HTTP_200
@@ -541,16 +611,19 @@ class NILM(object):
         if not self._accept_inst(inst_id):
             resp.status = falcon.HTTP_400
             resp.body = "Installation not in list for this NILM instance."
+            logging.info(("Rejected request for installation %s") % (inst_id))
             return
         if self._input_method != 'rest':
             resp.status = falcon.HTTP_405
-            resp.body = "PUT method not allows when operating" + \
+            resp.body = "PUT method not allowed when operating" + \
                 "outside 'REST' mode"
+            logging.info("Attempted to call PUT method outside \'REST\' mode")
             return
 
         if req.content_length:
             data = pd.read_json(req.stream)
         else:
+            logging.info("No data provided")
             raise falcon.HTTPBadRequest("No data provided", "No data provided")
         # Load or create the model, if not available
         if (inst_id not in self._models.keys()):
@@ -575,6 +648,7 @@ class NILM(object):
         if self._recomputation_active[inst_id]:
             resp.status = falcon.HTTP_204
             resp.body = "Model recomputation in progress, send data again later"
+            logging.info("Received request while model recomputation is in progress")
             return
         if inst_id not in self._model_lock.keys():
             self._model_lock[inst_id] = threading.Lock()
@@ -585,7 +659,7 @@ class NILM(object):
             model.update(data)
         logging.debug('NILM unlock (PUT)')
         time.sleep(0.01)
-        # Store data if needed, and prepare response.
+        self._handle_notifications(model)
         self._put_count[inst_id] += 1
         if (self._put_count[inst_id] % self.STORE_PERIOD == 0):
             # Persistent storage
@@ -746,6 +820,7 @@ class NILM(object):
         created. Expects parameters appliance_id, name and category, all
         strings.
         """
+        # TODO: Also update live appliance
         if not self._accept_inst(inst_id):
             resp.status = falcon.HTTP_400
             resp.body = "Installation not in list for this NILM instance."
@@ -765,7 +840,7 @@ class NILM(object):
         with self._model_lock[inst_id]:
             model = self._load_model(inst_id)
             if appliance_id not in model.appliances:
-                logging.debug("Appliance id %s not found in model")
+                logging.warning("Appliance id %s not found in model")
                 self._model_lock[inst_id].release()
                 time.sleep(0.01)
                 resp.status = falcon.HTTP_400
@@ -775,8 +850,17 @@ class NILM(object):
             prev_category = model.appliances[appliance_id].category
             model.appliances[appliance_id].name = name
             model.appliances[appliance_id].category = category
-            model.appliances[appliance_id].verifyied = True
-            logging.debug(("Installation: %s. Renamed appliance "
+            model.appliances[appliance_id].verified = True
+            # Also update live appliance
+            live_idx = next(item for item in model.live if
+                            item['appliance_id'] == appliance_id)
+            if live_idx is None:
+                logging.warning("Notifications: Appliance id %s not in list of live appliances")
+            else:
+                model.live[live_idx].name = name
+                model.live[live_idx].category = category
+                model.live[live_idx].verified = True
+            logging.info(("Installation: %s. Renamed appliance "
                            "%s from %s with "
                            "category %s to %s with category %s") %
                           (inst_id, appliance_id, prev_name,

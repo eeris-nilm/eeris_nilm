@@ -57,19 +57,24 @@ def read_eeris(path_prefix, date_start=None, date_end=None):
             # Just making sure, this is redundant
             d = d.replace(hour=0, minute=0)
             end_sec = d_end.hour * 3600 + d_end.minute * 60 + d_end.second
-        df = pd.read_csv(f, index_col='timestamp', parse_dates=parse_dates)
+        df = pd.read_csv(f, index_col='ts', parse_dates=parse_dates)
         df.index = pd.to_datetime(df.index, unit='s', origin='unix')
         df = df.iloc[start_sec:end_sec]
         df_list.append(df)
         d += datetime.timedelta(days=1)
         d = d.replace(hour=0, minute=0)
         start_sec = 0
-    data = pd.concat(df_list)
+    if not df_list:
+        raise ValueError("No data for given dates")
+    if len(df_list) == 1:
+        data = df_list[0]
+    else:
+        data = pd.concat(df_list)
     # Set the appropriate column names and remove index name
-    mapper = {"pwrA": "active",
-              "rpwrA": "reactive",
-              "curA": "current",
-              "vltA": "voltage"}
+    mapper = {"p": "active",
+              "q": "reactive",
+              "i": "current",
+              "v": "voltage"}
     data.rename(mapper=mapper, axis='columns', inplace=True)
     data.index = data.index.rename(None)
     return data

@@ -222,10 +222,9 @@ elif dataset == 'cenote':
     model_path_r = 'tests/data/model_cenote.dill'
     model_path_w = 'tests/data/model_cenote.dill'
 elif dataset == 'eeris':
-    p = ('tests/data/eeRIS/snapshot_07042020/124B0011EEE909/124B0002CC3CCD'
-         '/124B0011EEE909_124B0002CC3CCD_')
+    p = 'tests/data/eeris/5e05d5c83e442d4f78db036f_'
     date_start = '2020-03-01T00:00'
-    date_end = '2020-03-31T23:59'
+    date_end = '2020-11-30T23:59'
     inst_id = '5e05d5c83e442d4f78db036f'
     model_path_r = 'tests/data/model_eeris.dill'
     model_path_w = 'tests/data/model_eeris.dill'

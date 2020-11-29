@@ -33,7 +33,7 @@ import threading
 import json
 import atexit
 import configparser
-import jwt
+import utils
 from datetime import datetime, timedelta
 from eeris_nilm.datasets import eco
 
@@ -73,22 +73,6 @@ def request_activations(nilm_url, stop_event, token, interval=90):
     print('Activations requests thread stopping.')
 
 
-def get_jwt(user, secret):
-    """
-    Helper that generates a JWT given a username and a secret.
-    """
-    now = datetime.utcnow()
-    payload = {
-        'user': user,
-        'iat': now,
-        'nbf': now,
-        'exp': now + timedelta(24*60*60)
-    }
-
-    jwt_token = jwt.encode(payload, secret, algorithm='HS256').decode('utf-8')
-    return jwt_token
-
-
 p = 'tests/data/01_sm_csv/01'
 date_start = '2012-06-15T00:00'
 date_end = '2012-06-15T23:59'
@@ -99,7 +83,7 @@ plot_step = 600
 config = configparser.ConfigParser()
 config.read('ini/eeris.ini')
 secret = config['REST']['jwt_psk']
-token = get_jwt('orchestrator', secret)
+token = utils.get_jwt('orchestrator', secret)
 prefix = 'jwt'
 
 # Just select the first installation for the demo.
