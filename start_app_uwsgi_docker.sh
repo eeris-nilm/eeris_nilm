@@ -16,5 +16,5 @@ service nginx start
 
 # Launch uwsgi
 uwsgi /usr/local/eeris/eeris_nilm/ini/uwsgi.ini --reload-on-exception \
-      > /var/log/uwsgi/eeris_nilm.stdout.log \
-      2> /var/log/uwsgi/eeris_nilm.stderr.log
+      >> /var/log/uwsgi/eeris_nilm.stdout.log \
+      2>> /var/log/uwsgi/eeris_nilm.stderr.log
