@@ -110,7 +110,7 @@ class NILM(object):
             return True
         else:
             logging.warning(("Received installation id %s which is not in list."
-                           "Ignoring.") % (inst_id))
+                             "Ignoring.") % (inst_id))
             return False
 
     def _send_activations(self):
@@ -230,7 +230,7 @@ class NILM(object):
         if model.detected_appliance is None:
             # No appliance was detected, do nothing
             return
-        
+
         body = {
             "_id": model.detected_appliance.appliance_id,
             "name": model.detected_appliance.name,
@@ -249,7 +249,6 @@ class NILM(object):
             )
             logging.error("Request body:")
             logging.error("%s" % (json.dumps(body)))
-        
 
     def _mqtt(self):
         """
@@ -263,6 +262,22 @@ class NILM(object):
 
         def on_disconnect(client, userdata, rc):
             print("MQTT client disconnected" + mqtt.connack_string(rc))
+
+            if rc != 0:
+                print('Unexpected MQTT disconnect. Attempting to reconnect')
+            else:
+                print('rc value:' + str(rc))
+
+            counter = 0
+            while counter < 10:
+                try:
+                    print("Trying to Reconnect")
+                    client.connect(broker, broker_port)
+                    break
+                except:
+                    print("Error in broker connection attempt. Retrying.")
+                    counter += 1
+                    continue
 
         def on_message(client, userdata, message):
             x = message.topic.split('/')
@@ -645,7 +660,8 @@ class NILM(object):
         if self._recomputation_active[inst_id]:
             resp.status = falcon.HTTP_204
             resp.body = "Model recomputation in progress, send data again later"
-            logging.info("Received request while model recomputation is in progress")
+            logging.info(
+                "Received request while model recomputation is in progress")
             return
         if inst_id not in self._model_lock.keys():
             self._model_lock[inst_id] = threading.Lock()
@@ -852,16 +868,17 @@ class NILM(object):
             live_idx = next(item for item in model.live if
                             item['appliance_id'] == appliance_id)
             if live_idx is None:
-                logging.warning("Notifications: Appliance id %s not in list of live appliances")
+                logging.warning(
+                    "Notifications: Appliance id %s not in list of live appliances")
             else:
                 model.live[live_idx].name = name
                 model.live[live_idx].category = category
                 model.live[live_idx].verified = True
             logging.info(("Installation: %s. Renamed appliance "
-                           "%s from %s with "
-                           "category %s to %s with category %s") %
-                          (inst_id, appliance_id, prev_name,
-                           prev_category, name, category))
+                          "%s from %s with "
+                          "category %s to %s with category %s") %
+                         (inst_id, appliance_id, prev_name,
+                          prev_category, name, category))
             # Make sure to store the model
             self._store_model(inst_id)
         time.sleep(0.01)
