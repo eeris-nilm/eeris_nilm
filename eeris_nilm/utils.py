@@ -440,7 +440,7 @@ def get_jwt(user, secret):
         'user': user,
         'iat': now,
         'nbf': now,
-        'exp': now + timedelta(seconds=24*60*60)
+        'exp': now + timedelta(seconds=1*60*60)
     }
 
     jwt_token = jwt.encode(payload, secret, algorithm='HS256').decode('utf-8')

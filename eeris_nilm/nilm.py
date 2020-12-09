@@ -176,6 +176,8 @@ class NILM(object):
                         ret[inst_id] = resp
                     else:
                         # Everything went well, mark the activations as sent
+                        logging.debug(
+                            "Activations for %s sent successfully", inst_id)
                         ret[inst_id] = \
                             json.dumps(a.return_new_activations(update_ts=True))
                 else:
@@ -249,6 +251,8 @@ class NILM(object):
             )
             logging.error("Request body:")
             logging.error("%s" % (json.dumps(body)))
+        else:
+            logging.debug("Appliance detection notification sent: %s" % (body))
 
     def _mqtt(self):
         """
@@ -264,18 +268,24 @@ class NILM(object):
             print("MQTT client disconnected" + mqtt.connack_string(rc))
 
             if rc != 0:
-                print('Unexpected MQTT disconnect. Attempting to reconnect')
+                logging.error(
+                    'Unexpected MQTT disconnect. Attempting to reconnect')
             else:
-                print('rc value:' + str(rc))
+                logging.error('MQTT disconnected, rc value:' + str(rc))
 
             counter = 0
             while counter < 10:
                 try:
-                    print("Trying to Reconnect")
-                    client.connect(broker, broker_port)
+                    broker = self._config['MQTT']['broker']
+                    port = int(self._config['MQTT']['port'])
+                    logging.info("Waiting 10 seconds...")
+                    time.sleep(10)
+                    logging.info("Trying to Reconnect...")
+                    client.connect(broker, port=port)
                     break
                 except:
-                    print("Error in broker connection attempt. Retrying.")
+                    logging.error(
+                        "Error in broker connection attempt. Retrying.")
                     counter += 1
                     continue
 
@@ -544,7 +554,7 @@ class NILM(object):
             url = self._computations_url + inst_id
             # Main recomputation loop.
             rstep = step
-            for ts in range(start_ts, end_ts-warmup_period, rstep):
+            for ts in range(start_ts, end_ts - warmup_period, rstep):
                 # Endpoint expects timestamp in milliseconds since unix epoch
                 st = ts * 1000
                 if ts + rstep < end_ts:
@@ -579,7 +589,7 @@ class NILM(object):
             r = utils.request_with_retry(url, params, request='get',
                                          token=self._orch_token)
             data = utils.get_data_from_cenote_response(r)
-            rstep = 3
+            rstep = 3  # Hardcoded
             for i in range(0, data.shape[0], rstep):
                 d = data.iloc[i:i+rstep, :]
                 model.update(d, start_thread=False)
@@ -588,6 +598,9 @@ class NILM(object):
                     # Persistent storage
                     self._store_model(inst_id)
         self._recomputation_active[inst_id] = False
+
+    def _batch_appliance_naming(self, naming):
+        pass
 
     def on_get(self, req, resp, inst_id):
         """
@@ -833,7 +846,6 @@ class NILM(object):
         created. Expects parameters appliance_id, name and category, all
         strings.
         """
-        # TODO: Also update live appliance
         if not self._accept_inst(inst_id):
             resp.status = falcon.HTTP_400
             resp.body = "Installation not in list for this NILM instance."

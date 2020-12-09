@@ -188,7 +188,7 @@ else:
 # Edit these to fit your setup.
 
 # The real-time NILM loop runs every 'step' measurements
-step = 3
+step = 5
 # Whether to display on the screen or save to a video file. Change this to True
 # to save a file
 # save = True

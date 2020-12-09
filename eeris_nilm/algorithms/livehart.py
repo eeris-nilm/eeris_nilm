@@ -807,9 +807,11 @@ class LiveHart(object):
                 # Register detection to support notifications to the users for
                 # appliance naming.
                 self.detected_appliance = None
-                # TODO: Restrict to unknown category only?
+                # TODO: Restrict to unknown category only? Any additional constraints?
                 if not candidates[0][0].live:
                     self.detected_appliance = candidates[0][0]
+                    logging.debug("Detected appliance %s. Sending notification"
+                                  "request" % (str(self.detected_appliance.signature)))
             # For activations
             self.live[0].start_ts = self._edge_start_ts
             # Done
@@ -850,9 +852,8 @@ class LiveHart(object):
                                                 'reactive':
                                                 self.live[i].signature[0][1]},
                                           index=[0])
-                    self.live_history = \
-                        self.live_history.append(tmp_df, ignore_index=True,
-                                                 sort=True)
+                    self.live_history = self.live_history.append(tmp_df, ignore_index=True,
+                                                                 sort=True)
                 # Remove appliance from live
                 self.live.pop(i)
                 break
@@ -899,10 +900,9 @@ class LiveHart(object):
             # Assumes two-state appliances.
             # TODO: Use Appliance.compare_power() in the future. (?)
             try:
-                match, d = \
-                    utils.match_power(self.appliances_live[k].signature[0],
-                                      a.signature[0], active_only=False,
-                                      t=self.MATCH_THRESHOLD)
+                match, d = utils.match_power(self.appliances_live[k].signature[0],
+                                             a.signature[0], active_only=False,
+                                             t=self.MATCH_THRESHOLD)
             except ValueError:
                 continue
             # We want to only consider appliances that are not already
@@ -1019,8 +1019,8 @@ class LiveHart(object):
         self.residual_live = self.running_avg_power - total_estimated
         if self.residual_live[0] < 0:
             logging.info(("Something's wrong with the residual estimation:"
-                           "Background: %f, Residual: %f") %
-                          (self.background_active, self.residual_live[0]))
+                          "Background: %f, Residual: %f") %
+                         (self.background_active, self.residual_live[0]))
             self.residual_live[0] = 0.0
 
     def _update_background(self):
@@ -1100,10 +1100,9 @@ class LiveHart(object):
         # With threads
         if (self._clustering_thread is None) or \
            (not self._clustering_thread.is_alive()):
-            self._clustering_thread = \
-                threading.Thread(target=self._static_cluster,
-                                 name='clustering_thread',
-                                 kwargs={'method': method})
+            self._clustering_thread = threading.Thread(target=self._static_cluster,
+                                                       name='clustering_thread',
+                                                       kwargs={'method': method})
             self._clustering_thread.start()
             # To ensure that the lock can be acquired by the thread
             time.sleep(0.01)
