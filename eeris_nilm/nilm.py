@@ -168,7 +168,7 @@ class NILM(object):
                     resp = requests.post(self._activations_url,
                                          data=json.dumps(body),
                                          headers={'Authorization': 'jwt %s' % (self._orch_token)})
-                    if resp.status_code != falcon.HTTP_200:
+                    if resp.status_code != 200:
                         logging.error(
                             "Sending of activation data for %s failed: (%d, %s)"
                             % (inst_id, resp.status_code, resp.text)
@@ -216,8 +216,10 @@ class NILM(object):
             act_result = self._send_activations()
             logging.debug("Activations report:")
             logging.debug(act_result)
-        except:
+        except Exception as e:
             logging.error("Sending of activations failed!")
+            logging.error("Exception type: %s" % (str(type(e))))
+            logging.error(e)
             # Continue
         # Submit new thread
         self._p_thread = threading.Timer(period, self._periodic_thread)
@@ -244,7 +246,7 @@ class NILM(object):
         resp = requests.post(self._notifications_url + '/newdevice',
                              data=json.dumps(body),
                              headers={'Authorization': 'jwt %s' % (self._orch_token)})
-        if resp.status_code != falcon.HTTP_200:
+        if resp.status_code != 200:
             logging.error(
                 "Sending of notification data for %s failed: (%d, %s)"
                 % (model.installation_id, resp.status_code, resp.text)
@@ -283,7 +285,8 @@ class NILM(object):
                     logging.info("Trying to Reconnect...")
                     client.connect(broker, port=port)
                     break
-                except:
+                except Exception as e:
+                    logging.error(e)
                     logging.error(
                         "Error in broker connection attempt. Retrying.")
                     counter += 1
@@ -299,9 +302,10 @@ class NILM(object):
             # Convert message payload to pandas dataframe
             try:
                 msg_d = json.loads(msg.replace('\'', '\"'))
-            except:
+            except Exception as e:
                 logging.error("Exception occurred while decoding message:")
                 logging.error(msg)
+                logging.error(e)
                 logging.error("Ignoring data")
                 return
 
