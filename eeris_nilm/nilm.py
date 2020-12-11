@@ -179,10 +179,10 @@ class NILM(object):
                         logging.debug(
                             "Activations for %s sent successfully", inst_id)
                         ret[inst_id] = \
-                            json.dumps(a.return_new_activations(update_ts=True))
+                            json.dumps(body)
                 else:
                     ret[inst_id] = \
-                        json.dumps(a.return_new_activations(update_ts=True))
+                        json.dumps(body)
                 # Move on to the next installation
                 logging.debug(
                     "Done sending activations of installation %s" % (inst_id))
@@ -241,11 +241,13 @@ class NILM(object):
             "type": model.detected_appliance.category,
             "status": "true"
         }
+        logging.debug("Sending notification data: %s", json.dumps(body))
         # TODO: Only when expired?
         self._orch_token = utils.get_jwt('nilm', self._orch_jwt_psk)
         resp = requests.post(self._notifications_url + '/newdevice',
                              data=json.dumps(body),
-                             headers={'Authorization': 'jwt %s' % (self._orch_token)})
+                             headers={'Authorization': 'jwt %s' %
+                                      (self._orch_token)})
         if resp.status_code != 200:
             logging.error(
                 "Sending of notification data for %s failed: (%d, %s)"

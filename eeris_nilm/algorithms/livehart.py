@@ -162,7 +162,8 @@ class LiveHart(object):
         self.live_history = pd.DataFrame([], columns=['start', 'end', 'name',
                                                       'active', 'reactive'])
         # Variable to trigger potential applicance naming notifications to the
-        # end-users. It stores the detected appliances that were activated for naming
+        # end-users. It stores the detected appliances that were activated for
+        # naming
         self.detected_appliance = None
 
         # Other variables - needed for sanity checks
@@ -404,7 +405,11 @@ class LiveHart(object):
         for k in self.appliances_live.keys():
             if k in mapping.keys():
                 m = mapping[k]
-                a[m].live = True
+                # TODO: .live signifies that an appliance has been detected
+                # through the clustering procedure (even if it's a copy of an
+                # appliance from self.appliances). We therefore don't set it to
+                # true here. TODO: Verify this.
+                # a[m].live = True
                 a[m].start_ts = self.appliances_live[k].start_ts
                 # In case the appliance is operating, replace with new live.
                 try:
@@ -418,13 +423,15 @@ class LiveHart(object):
                 a[k] = self.appliances_live[k]
         self.appliances_live = a
 
+    # TODO: delete this?
     def _sync_appliances_live_copy(self):
         """
         The live appliances are just a copy of the clustered appliances.
         """
         a = self.appliances.copy()
-        for k in a.keys():
-            a[k].live = True
+        # See comment on sync_appliances live
+        # for k in a.keys():
+        #    a[k].live = True
         self.appliances_live = a
 
     def _sync_appliances_live_1_DEPRECATED(self, mapping):
@@ -779,7 +786,7 @@ class LiveHart(object):
         if e[0] > 0:
             appliance_id = str(bson.objectid.ObjectId())
             name = 'Live %s' % (str(self._appliance_display_id))
-            # TODO: Determine appliance category
+            # TODO: Determine appliance category.
             category = 'unknown'
             a = appliance.Appliance(appliance_id, name, category,
                                     signature=e.reshape(-1, 1).T)
@@ -807,11 +814,13 @@ class LiveHart(object):
                 # Register detection to support notifications to the users for
                 # appliance naming.
                 self.detected_appliance = None
-                # TODO: Restrict to unknown category only? Any additional constraints?
+                # TODO: Restrict to unknown category only? Any additional
+                # constraints?
                 if not candidates[0][0].live:
                     self.detected_appliance = candidates[0][0]
                     logging.debug("Detected appliance %s. Sending notification"
-                                  "request" % (str(self.detected_appliance.signature)))
+                                  "request" %
+                                  (str(self.detected_appliance.signature)))
             # For activations
             self.live[0].start_ts = self._edge_start_ts
             # Done
