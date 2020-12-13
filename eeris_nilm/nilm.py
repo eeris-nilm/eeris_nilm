@@ -31,6 +31,7 @@ import requests
 
 from eeris_nilm import utils
 from eeris_nilm.algorithms import livehart
+from eeris_nilm.datasets import eeris
 
 # TODO: Refactoring to break into eeris-specific and general-purpose components
 # TODO: Support for multiple processes for specified list of installation ids
@@ -46,6 +47,8 @@ class NILM(object):
     # How often (after how many updates) should we store the model
     # persistently?
     STORE_PERIOD = 10
+    # THREAD_PERIOD = 3600
+    THREAD_PERIOD = 60
 
     def __init__(self, mdb, config, response='cenote'):
         """
@@ -71,6 +74,9 @@ class NILM(object):
         self._recomputation_thread = None
         self._mqtt_thread = None
         self._p_thread = None
+        self._input_file_prefix = None
+        self._file_date_start = None
+        self._file_date_end = None
 
         # Configuration variables
         # How are we receiving data
@@ -78,6 +84,12 @@ class NILM(object):
         # Installation ids that we accept for processing
         self._inst_list = \
             [x.strip() for x in config['eeRIS']['inst_ids'].split(",")]
+        # Whether to send requests to orchestrator (off) or just print the
+        # requests (on)
+        if config['orchestrator']['debug_mode'] == 'on':
+            self._orch_debug_mode = True
+        else:
+            self._orch_debug_mode = False
         # Orchestrator JWT pre-shared key
         self._orch_jwt_psk = config['orchestrator']['jwt_psk']
         # Orchestrator URL
@@ -94,7 +106,7 @@ class NILM(object):
         # = True in the eeRIS configuration section)
         thread = config['eeRIS'].getboolean('thread')
         if thread:
-            self._periodic_thread(period=3600)
+            self._periodic_thread(period=self.THREAD_PERIOD)
             # We want to be able to cancel this. If we don't, remove this and
             # just make it a daemon thread.
             atexit.register(self._cancel_periodic_thread)
@@ -104,6 +116,11 @@ class NILM(object):
                                                  daemon=True)
             self._mqtt_thread.start()
             logging.info("Registered mqtt thread")
+        if config['eeRIS']['input_method'] == 'file':
+            self._input_file_prefix = config['FILE']['prefix']
+            self._file_date_start = config['FILE']['date_start']
+            self._file_date_end = config['FILE']['date_end']
+            self._process_file()
 
     def _accept_inst(self, inst_id):
         if self._inst_list is None or inst_id in self._inst_list:
@@ -112,6 +129,29 @@ class NILM(object):
             logging.warning(("Received installation id %s which is not in list."
                              "Ignoring.") % (inst_id))
             return False
+
+    def _load_or_create_model(self, inst_id):
+        # Load or create the model, if not available
+        if (inst_id not in self._models.keys()):
+            inst_doc = self._mdb.models.find_one({"meterId": inst_id})
+            if inst_doc is None:
+                modelstr = dill.dumps(
+                    livehart.LiveHart(installation_id=inst_id)
+                )
+                dtime = dt.datetime.now().strftime('%Y-%m-%dT%H:%M:%S%z')
+                inst_doc = {'meterId': inst_id,
+                            'lastUpdate': dtime,
+                            'debugInstallation': True,
+                            'modelHart': modelstr}
+                self._mdb.models.insert_one(inst_doc)
+            self._models[inst_id] = dill.loads(inst_doc['modelHart'])
+            if self._models[inst_id]._lock.locked():
+                self._models[inst_id]._lock.release()
+            self._model_lock[inst_id] = threading.Lock()
+            self._recomputation_active[inst_id] = False
+            self._put_count[inst_id] = 0
+        if inst_id not in self._model_lock.keys():
+            self._model_lock[inst_id] = threading.Lock()
 
     def _send_activations(self):
         """
@@ -134,7 +174,7 @@ class NILM(object):
                 self._model_lock[inst_id] = threading.Lock()
             with self._model_lock[inst_id]:
                 payload = []
-                for a_k, a in model.appliances:
+                for a_k, a in model.appliances.items():
                     # For now, do not mark activations as sent (we'll do that
                     # only if data have been successfully sent)
                     activations = a.return_new_activations(update_ts=False)
@@ -159,16 +199,19 @@ class NILM(object):
                 body = {
                     "payload": payload
                 }
+                logging.debug('Activations body: %s' % (json.dumps(body)))
                 # Send stuff
-                if self._activations_url is not None:
+                if self._activations_url is not None and \
+                   not self._orch_debug_mode:
                     # Create a JWT for the orchestrator (alternatively, we can
                     # do this only when token has expired)
                     self._orch_token = utils.get_jwt('nilm', self._orch_jwt_psk)
                     # Change data= to json= depending on the orchestrator setup
                     resp = requests.post(self._activations_url,
                                          data=json.dumps(body),
-                                         headers={'Authorization': 'jwt %s' % (self._orch_token)})
-                    if resp.status_code != 200:
+                                         headers={'Authorization': 'jwt %s' %
+                                                  (self._orch_token)})
+                    if resp.ok:
                         logging.error(
                             "Sending of activation data for %s failed: (%d, %s)"
                             % (inst_id, resp.status_code, resp.text)
@@ -241,22 +284,26 @@ class NILM(object):
             "type": model.detected_appliance.category,
             "status": "true"
         }
-        logging.debug("Sending notification data: %s", json.dumps(body))
+        logging.debug("Sending notification data:")
         # TODO: Only when expired?
         self._orch_token = utils.get_jwt('nilm', self._orch_jwt_psk)
-        resp = requests.post(self._notifications_url + '/newdevice',
-                             data=json.dumps(body),
-                             headers={'Authorization': 'jwt %s' %
-                                      (self._orch_token)})
-        if resp.status_code != 200:
-            logging.error(
-                "Sending of notification data for %s failed: (%d, %s)"
-                % (model.installation_id, resp.status_code, resp.text)
-            )
-            logging.error("Request body:")
-            logging.error("%s" % (json.dumps(body)))
+        if not self._orch_debug_mode:
+            resp = requests.post(self._notifications_url + '/newdevice',
+                                 data=json.dumps(body),
+                                 headers={'Authorization': 'jwt %s' %
+                                          (self._orch_token)})
+            if resp.ok:
+                logging.error(
+                    "Sending of notification data for %s failed: (%d, %s)"
+                    % (model.installation_id, resp.status_code, resp.text)
+                )
+                logging.error("Request body:")
+                logging.error("%s" % (json.dumps(body)))
+            else:
+                logging.debug("Appliance detection notification sent: %s" %
+                              (json.dumps(body)))
         else:
-            logging.debug("Appliance detection notification sent: %s" % (body))
+            logging.debug("Notification: %s", json.dumps(body))
 
     def _mqtt(self):
         """
@@ -353,31 +400,35 @@ class NILM(object):
         client.connect(broker, port=port)
         # Prepare the models
         for inst_id in self._inst_list:
-            # Load or create the model, if not available
-            if (inst_id not in self._models.keys()):
-                inst_doc = self._mdb.models.find_one({"meterId": inst_id})
-                if inst_doc is None:
-                    modelstr = dill.dumps(
-                        livehart.LiveHart(installation_id=inst_id)
-                    )
-                    dtime = dt.datetime.now().strftime('%Y-%m-%dT%H:%M:%S%z')
-                    inst_doc = {'meterId': inst_id,
-                                'lastUpdate': dtime,
-                                'debugInstallation': True,
-                                'modelHart': modelstr}
-                    self._mdb.models.insert_one(inst_doc)
-                self._models[inst_id] = dill.loads(inst_doc['modelHart'])
-                if self._models[inst_id]._lock.locked():
-                    self._models[inst_id]._lock.release()
-                self._model_lock[inst_id] = threading.Lock()
-                self._recomputation_active[inst_id] = False
-                self._put_count[inst_id] = 0
-            if inst_id not in self._model_lock.keys():
-                self._model_lock[inst_id] = threading.Lock()
+            self._load_or_create_model(inst_id)
         # Subscribe
         sub_list = [(topic_prefix + "/" + x, 2) for x in self._inst_list]
         client.subscribe(sub_list)
         client.loop_forever()
+
+    def _process_file(self):
+        if len(self._inst_list) > 1:
+            raise ValueError('Only one installation is supported in file mode')
+        inst_id = self._inst_list[0]
+        self._load_or_create_model(inst_id)
+        model = self._models[inst_id]
+        power = eeris.read_eeris(self._input_file_prefix, self._file_date_start,
+                                 self._file_date_end)
+        step = 3  # Hardcoded
+        logging_step = 7200
+        start_ts = pd.Timestamp(self._file_date_start)
+        power = power.loc[power.index > start_ts].dropna()
+        end = power.shape[0] - power.shape[0] % step
+        for i in range(0, end, step):
+            data = power.iloc[i:i+step]
+            model.update(data)
+            if (i + step) % logging_step == 0:
+                logging.debug('Processed %d seconds' % (i + step))
+        self._handle_notifications(model)
+        self._put_count[inst_id] += step
+        if (self._put_count[inst_id] % self.STORE_PERIOD == 0):
+            # Persistent storage
+            self._store_model(inst_id)
 
     def _prepare_response_body(self, model):
         """ Wrapper function """
@@ -657,24 +708,7 @@ class NILM(object):
             logging.info("No data provided")
             raise falcon.HTTPBadRequest("No data provided", "No data provided")
         # Load or create the model, if not available
-        if (inst_id not in self._models.keys()):
-            inst_doc = self._mdb.models.find_one({"meterId": inst_id})
-            if inst_doc is None:
-                modelstr = dill.dumps(
-                    livehart.LiveHart(installation_id=inst_id)
-                )
-                inst_doc = {'meterId': inst_id,
-                            'lastUpdate':
-                            dt.datetime.now().strftime('%Y-%m-%dT%H:%M:%S%z'),
-                            'debugInstallation': True,
-                            'modelHart': modelstr}
-                self._mdb.models.insert_one(inst_doc)
-            self._models[inst_id] = dill.loads(inst_doc['modelHart'])
-            if self._models[inst_id]._lock.locked():
-                self._models[inst_id]._lock.release()
-            self._model_lock[inst_id] = threading.Lock()
-            self._recomputation_active[inst_id] = False
-            self._put_count[inst_id] = 0
+        self._load_or_create_model(inst_id)
         # Inform caller if recomputation is active
         if self._recomputation_active[inst_id]:
             resp.status = falcon.HTTP_204
@@ -887,7 +921,8 @@ class NILM(object):
                             item['appliance_id'] == appliance_id)
             if live_idx is None:
                 logging.warning(
-                    "Notifications: Appliance id %s not in list of live appliances")
+                    "Notifications: Appliance id %s not in the"
+                    "list of live appliances")
             else:
                 model.live[live_idx].name = name
                 model.live[live_idx].category = category
