@@ -86,10 +86,10 @@ class NILM(object):
             [x.strip() for x in config['eeRIS']['inst_ids'].split(",")]
         # Whether to send requests to orchestrator (off) or just print the
         # requests (on)
-        if config['orchestrator']['debug_mode'] == 'on':
-            self._orch_debug_mode = True
-        else:
-            self._orch_debug_mode = False
+        self._orch_debug_mode = False
+        if 'debug_mode' in config['orchestrator'].keys():
+            if config['orchestrator']['debug_mode'] == 'on':
+                self._orch_debug_mode = True
         # Orchestrator JWT pre-shared key
         self._orch_jwt_psk = config['orchestrator']['jwt_psk']
         # Orchestrator URL
@@ -100,8 +100,13 @@ class NILM(object):
         # Recomputation data URL
         self._computations_url = orchestrator_url + \
             config['orchestrator']['comp_endpoint']
-        self._notifications_url = orchestrator_url + \
-            config['orchestrator']['notif_endpoint']
+        self._notifications_url = orchestrator_url + '/' + \
+            config['orchestrator']['notif_endpoint_prefix']
+        self._notifications_suffix = \
+            config['orchestrator']['notif_endpoint_suffix']
+        self._notifications_past_suffix = \
+            config['orchestrator']['notif_past_suffix']
+
         # Initialize thread for sending activation data periodically (if thread
         # = True in the eeRIS configuration section)
         thread = config['eeRIS'].getboolean('thread')
@@ -211,7 +216,7 @@ class NILM(object):
                                          data=json.dumps(body),
                                          headers={'Authorization': 'jwt %s' %
                                                   (self._orch_token)})
-                    if resp.ok:
+                    if not resp.ok:
                         logging.error(
                             "Sending of activation data for %s failed: (%d, %s)"
                             % (inst_id, resp.status_code, resp.text)
@@ -284,15 +289,17 @@ class NILM(object):
             "type": model.detected_appliance.category,
             "status": "true"
         }
+        inst_id = model.installation_id
         logging.debug("Sending notification data:")
         # TODO: Only when expired?
         self._orch_token = utils.get_jwt('nilm', self._orch_jwt_psk)
         if not self._orch_debug_mode:
-            resp = requests.post(self._notifications_url + '/newdevice',
+            resp = requests.post(self._notifications_url + '/' + inst_id +
+                                 self._notifications_suffix,
                                  data=json.dumps(body),
                                  headers={'Authorization': 'jwt %s' %
                                           (self._orch_token)})
-            if resp.ok:
+            if not resp.ok:
                 logging.error(
                     "Sending of notification data for %s failed: (%d, %s)"
                     % (model.installation_id, resp.status_code, resp.text)
@@ -654,10 +661,73 @@ class NILM(object):
                 if (self._put_count[inst_id] % self.STORE_PERIOD == 0):
                     # Persistent storage
                     self._store_model(inst_id)
+
+            # Name the appliances based on past user resposes
+            url = self._notifications_url + '/' + inst_id + \
+                self._notifications_past_suffix
+            self._orch_token = utils.get_jwt('nilm', self._orch_jwt_psk)
+            r = utils.request_with_retry(url, token=self._orch_token)
+            if not r.ok:
+                logging.error(
+                    "Error in receiving data for %s failed: (%d, %s)"
+                    % (inst_id, r.status_code, r.text)
+                )
+            else:
+                # Everything went well, process the past notification responses
+                logging.debug("Notifications for %s received successfully,"
+                              "processing.", inst_id)
+                self._recomputation_appliance_naming(inst_id, r.text)
         self._recomputation_active[inst_id] = False
 
-    def _batch_appliance_naming(self, naming):
-        pass
+    def _recomputation_appliance_naming(self, inst_id, naming):
+        """
+        Helper function to name detected appliances based on their activation
+        time and past user responses.
+
+        The 'naming' argument is a json string that has the following format:
+        {
+        'ok': True, 'results': [
+            {'profileid': '5e4e576484ad10180c404ecb',
+             'notificationid': '5f9d7187bdb8411380b8ad00',
+             'deviceid': '5d80e4c5e209594310f3dd07',
+             'selecteddevice': 'oven',
+             'timestamp': '1606129690518', // when the user responded
+             'uuid': 'ff77433f-e72e-4988-baf2-a48dd7c3afdd',
+             'cenote$created_at': 1606130024761,
+             'cenote$timestamp': 1606130024761,
+             'cenote$id': '54b67e7d-2c15-4ec6-82e7-5b80c585ad95',
+             'createdat': '1604153735987' // when the notification was sent  },
+        {
+           ...
+        },
+        ...
+        ]
+        }
+
+        In practice, we are interested for the fields 'selecteddevice' and
+        'createdat'.
+        """
+        model = self._models[inst_id]
+        notif = json.loads(naming)['results']
+        # Beyond 5 seconds we think there is no match (it's already a very large
+        # difference)
+        min_diff = pd.Timedelta(value=5, units='seconds')
+        appliance = None
+        for n in notif:
+            ts = pd.to_datetime(n['created_at'], unit='ms')
+            for a in model.appliances:
+                idx = a.activations['start'].sub(ts).abs().idxmin()
+                nearest = a.at[idx, 'start']
+                if ts - nearest < min_diff:
+                    appliance = a
+        if appliance is not None:
+            appliance.category = notif['selecteddevice']
+            # Handle multiple appliances of same type
+            count = 0
+            for a in model.appliances:
+                if a.category == appliance.category:
+                    count += 1
+            appliance.name = '%s %d' % (notif['selecteddevice'], count)
 
     def on_get(self, req, resp, inst_id):
         """

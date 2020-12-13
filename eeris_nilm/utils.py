@@ -414,7 +414,8 @@ def request_with_retry(url, params=None, data=None, json=None, request='get',
     while n_r < requests_limit:
         try:
             if token is not None:
-                r = f(url, params, **args, headers={'Authorization': 'jwt %s' % (token)})
+                r = f(url, params, **args, headers={'Authorization': 'jwt %s' %
+                                                    (token)})
             else:
                 r = f(url, params, **args)
             break
