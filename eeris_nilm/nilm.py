@@ -160,6 +160,17 @@ class NILM(object):
         if inst_id not in self._model_lock.keys():
             self._model_lock[inst_id] = threading.Lock()
 
+    def _mark_activations_sent(self, appliances, activations):
+        """
+        Mark sent activations for a dictionary of appliances.
+
+        appliances: dict of appliances of a model
+
+        activations: dict with activations of each appliance of appliances that
+        was sent (we cannot use the appliance.activations attribute due to
+        threading)
+        """
+
     def _send_activations(self):
         """
         Send activations to service responsible for storing appliance
@@ -181,11 +192,12 @@ class NILM(object):
                 self._model_lock[inst_id] = threading.Lock()
             with self._model_lock[inst_id]:
                 payload = []
+                activations = {}
                 for a_k, a in model.appliances.items():
                     # For now, do not mark activations as sent (we'll do that
                     # only if data have been successfully sent)
-                    activations = a.return_new_activations(update_ts=False)
-                    for row in activations.itertuples():
+                    activations[a_k] = a.return_new_activations(update_ts=False)
+                    for row in activations[a_k].itertuples():
                         # Energy consumption in kWh
                         # TODO: Correct consumption by reversing power
                         # normalization
@@ -207,35 +219,42 @@ class NILM(object):
                     "payload": payload
                 }
                 logging.debug('Activations body: %s' % (json.dumps(body)))
-                # Send stuff
-                if self._activations_url is not None and \
-                   not self._orch_debug_mode:
-                    # Create a JWT for the orchestrator (alternatively, we can
-                    # do this only when token has expired)
-                    self._orch_token = utils.get_jwt('nilm', self._orch_jwt_psk)
-                    # Change data= to json= depending on the orchestrator setup
-                    resp = requests.post(self._activations_url,
-                                         data=json.dumps(body),
-                                         headers={'Authorization': 'jwt %s' %
-                                                  (self._orch_token)})
-                    if not resp.ok:
-                        logging.error(
-                            "Sending of activation data for %s failed: (%d, %s)"
-                            % (inst_id, resp.status_code, resp.text)
-                        )
-                        ret[inst_id] = resp
-                    else:
-                        # Everything went well, mark the activations as sent
-                        logging.debug(
-                            "Activations for %s sent successfully", inst_id)
-                        ret[inst_id] = \
-                            json.dumps(body)
+            # Send stuff
+            if self._activations_url is not None and \
+               not self._orch_debug_mode:
+                # Create a JWT for the orchestrator (alternatively, we can
+                # do this only when token has expired)
+                self._orch_token = utils.get_jwt('nilm', self._orch_jwt_psk)
+                # Change data= to json= depending on the orchestrator setup
+                resp = requests.post(self._activations_url,
+                                     data=json.dumps(body),
+                                     headers={'Authorization': 'jwt %s' %
+                                              (self._orch_token)})
+                if not resp.ok:
+                    logging.error(
+                        "Sending of activation data for %s failed: (%d, %s)"
+                        % (inst_id, resp.status_code, resp.text)
+                    )
+                    ret[inst_id] = resp
                 else:
+                    # Everything went well, mark the activations as sent
+                    with self._model_lock[inst_id]:
+                        for a_k, a in model.appliances.items():
+                            a.last_returned_end_ts = activations[a_k][-1]['end']
+
+                        self._mark_activations_sent(model.appliances,
+                                                    activations)
+                    logging.debug(
+                        "Activations for %s sent successfully", inst_id)
                     ret[inst_id] = \
                         json.dumps(body)
-                # Move on to the next installation
-                logging.debug(
-                    "Done sending activations of installation %s" % (inst_id))
+            else:
+                ret[inst_id] = \
+                    json.dumps(body)
+
+            # Move on to the next installation
+            logging.debug(
+                "Done sending activations of installation %s" % (inst_id))
         return ret
 
     def _cancel_periodic_thread(self):
