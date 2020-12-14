@@ -48,7 +48,7 @@ class NILM(object):
     # persistently?
     STORE_PERIOD = 10
     # THREAD_PERIOD = 3600
-    THREAD_PERIOD = 60
+    THREAD_PERIOD = 300
 
     def __init__(self, mdb, config, response='cenote'):
         """
@@ -107,8 +107,20 @@ class NILM(object):
         self._notifications_past_suffix = \
             config['orchestrator']['notif_past_suffix']
 
+        if config['eeRIS']['input_method'] == 'file':
+            self._input_file_prefix = config['FILE']['prefix']
+            self._file_date_start = config['FILE']['date_start']
+            self._file_date_end = config['FILE']['date_end']
+            self._process_file()
+        if config['eeRIS']['input_method'] == 'mqtt':
+            self._mqtt_thread = threading.Thread(target=self._mqtt, name='mqtt',
+                                                 daemon=True)
+            self._mqtt_thread.start()
+            logging.info("Registered mqtt thread")
+
         # Initialize thread for sending activation data periodically (if thread
         # = True in the eeRIS configuration section)
+        time.sleep(self.THREAD_PERIOD)
         thread = config['eeRIS'].getboolean('thread')
         if thread:
             self._periodic_thread(period=self.THREAD_PERIOD)
@@ -116,16 +128,6 @@ class NILM(object):
             # just make it a daemon thread.
             atexit.register(self._cancel_periodic_thread)
             logging.info("Registered periodic thread")
-        if config['eeRIS']['input_method'] == 'mqtt':
-            self._mqtt_thread = threading.Thread(target=self._mqtt, name='mqtt',
-                                                 daemon=True)
-            self._mqtt_thread.start()
-            logging.info("Registered mqtt thread")
-        if config['eeRIS']['input_method'] == 'file':
-            self._input_file_prefix = config['FILE']['prefix']
-            self._file_date_start = config['FILE']['date_start']
-            self._file_date_end = config['FILE']['date_end']
-            self._process_file()
 
     def _accept_inst(self, inst_id):
         if self._inst_list is None or inst_id in self._inst_list:
