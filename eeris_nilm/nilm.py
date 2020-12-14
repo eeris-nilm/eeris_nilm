@@ -219,7 +219,7 @@ class NILM(object):
                     "payload": payload
                 }
                 logging.debug('Activations body: %s' % (json.dumps(body)))
-            # Send stuff
+            # Send stuff, outside lock (to avoid unnecessary delays)
             if self._activations_url is not None and \
                not self._orch_debug_mode:
                 # Create a JWT for the orchestrator (alternatively, we can
