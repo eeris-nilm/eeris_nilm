@@ -295,7 +295,7 @@ class NILM(object):
         self._orch_token = utils.get_jwt('nilm', self._orch_jwt_psk)
         if not self._orch_debug_mode:
             resp = requests.post(self._notifications_url + '/' + inst_id +
-                                 self._notifications_suffix,
+                                 '/' + self._notifications_suffix,
                                  data=json.dumps(body),
                                  headers={'Authorization': 'jwt %s' %
                                           (self._orch_token)})
@@ -663,7 +663,7 @@ class NILM(object):
                     self._store_model(inst_id)
 
             # Name the appliances based on past user resposes
-            url = self._notifications_url + '/' + inst_id + \
+            url = self._notifications_url + '/' + inst_id + '/' + \
                 self._notifications_past_suffix
             self._orch_token = utils.get_jwt('nilm', self._orch_jwt_psk)
             r = utils.request_with_retry(url, token=self._orch_token)
