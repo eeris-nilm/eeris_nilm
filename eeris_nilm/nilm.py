@@ -48,7 +48,7 @@ class NILM(object):
     # persistently?
     STORE_PERIOD = 10
     # THREAD_PERIOD = 3600
-    THREAD_PERIOD = 60
+    THREAD_PERIOD = 300
 
     def __init__(self, mdb, config, response='cenote'):
         """
