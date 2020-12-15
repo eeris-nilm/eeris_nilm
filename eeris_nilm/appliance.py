@@ -451,10 +451,10 @@ class Appliance(object):
         else:
             idx = self.activations['end'] > self.last_returned_end_ts
             activations = self.activations.loc[idx, :]
-        activations = activations.sort_values('end', ascending=True,
-                                              ignore_index=True)
+        # activations = activations.sort_values('end', ascending=True,
+        #                                        ignore_index=True)
         if update_ts:
-            self.last_returned_end_ts = activations[-1]['end']
+            self.last_returned_end_ts = activations['end'].iloc[-1]
         return activations
 
     def reset_activations_track(self):

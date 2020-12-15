@@ -48,7 +48,7 @@ class NILM(object):
     # persistently?
     STORE_PERIOD = 10
     # THREAD_PERIOD = 3600
-    THREAD_PERIOD = 300
+    THREAD_PERIOD = 60
 
     def __init__(self, mdb, config, response='cenote'):
         """
@@ -111,7 +111,9 @@ class NILM(object):
             self._input_file_prefix = config['FILE']['prefix']
             self._file_date_start = config['FILE']['date_start']
             self._file_date_end = config['FILE']['date_end']
-            self._process_file()
+            self._file_thread = threading.Thread(target=self._process_file,
+                                                 name='file', daemon=True)
+            self._file_thread.start()
         if config['eeRIS']['input_method'] == 'mqtt':
             self._mqtt_thread = threading.Thread(target=self._mqtt, name='mqtt',
                                                  daemon=True)
@@ -159,17 +161,6 @@ class NILM(object):
             self._put_count[inst_id] = 0
         if inst_id not in self._model_lock.keys():
             self._model_lock[inst_id] = threading.Lock()
-
-    def _mark_activations_sent(self, appliances, activations):
-        """
-        Mark sent activations for a dictionary of appliances.
-
-        appliances: dict of appliances of a model
-
-        activations: dict with activations of each appliance of appliances that
-        was sent (we cannot use the appliance.activations attribute due to
-        threading)
-        """
 
     def _send_activations(self):
         """
@@ -240,18 +231,43 @@ class NILM(object):
                     # Everything went well, mark the activations as sent
                     with self._model_lock[inst_id]:
                         for a_k, a in model.appliances.items():
-                            a.last_returned_end_ts = activations[a_k][-1]['end']
-
-                        self._mark_activations_sent(model.appliances,
-                                                    activations)
+                            # Should never happen
+                            if a_k not in activations:
+                                logging.warning('Appliance key %s not'
+                                                'found in model' % (a_k))
+                                continue
+                            else:
+                                # activations[a_k].sort_values('end',
+                                #                              ascending=True,
+                                #                              ignore_index=True)
+                                a.last_returned_end_ts = \
+                                    (activations[a_k])['end'].iloc[-1]
                     logging.debug(
                         "Activations for %s sent successfully", inst_id)
                     ret[inst_id] = \
                         json.dumps(body)
             else:
-                ret[inst_id] = \
-                    json.dumps(body)
+                # Assume everything went well (simulate), and mark activations
+                # as sent
+                with self._model_lock[inst_id]:
+                    for a_k, a in model.appliances.items():
+                        if a_k not in activations:
+                            logging.warning('Appliance key %s not'
+                                            'found in model' % (a_k))
+                            continue
+                        else:
+                            # activations[a_k].sort_values('end',
+                            #                              ascending=True,
+                            #                              ignore_index=True)
+                            a.last_returned_end_ts = \
+                                (activations[a_k])['end'].iloc[-1]
+                            logging.debug('Appliance %s: Last return ts: %s'
+                                          % (a.appliance_id,
+                                             str(a.last_returned_end_ts)))
 
+                logging.debug(
+                    "Activations for %s marked (debug)", inst_id)
+                ret[inst_id] = json.dumps(body)
             # Move on to the next installation
             logging.debug(
                 "Done sending activations of installation %s" % (inst_id))
@@ -281,17 +297,18 @@ class NILM(object):
             # Wait 5 minutes, in case clustering is completed within this time.
             time.sleep(300)
         # Send activations
-        try:
-            act_result = self._send_activations()
-            logging.debug("Activations report:")
-            logging.debug(act_result)
-        except Exception as e:
-            logging.error("Sending of activations failed!")
-            logging.error("Exception type: %s" % (str(type(e))))
-            logging.error(e)
-            # Continue
+        #try:
+        act_result = self._send_activations()
+        logging.debug("Activations report:")
+        logging.debug(act_result)
+        # except Exception as e:
+        #     logging.error("Sending of activations failed!")
+        #     logging.error("Exception type: %s" % (str(type(e))))
+        #     logging.error(e)
+        #     # Continue
         # Submit new thread
-        self._p_thread = threading.Timer(period, self._periodic_thread)
+        self._p_thread = threading.Timer(period, self._periodic_thread,
+                                         kwargs={'period': period})
         self._p_thread.daemon = True
         self._p_thread.start()
 
@@ -452,6 +469,7 @@ class NILM(object):
             model.update(data)
             if (i + step) % logging_step == 0:
                 logging.debug('Processed %d seconds' % (i + step))
+            time.sleep(0.01)
         self._handle_notifications(model)
         self._put_count[inst_id] += step
         if (self._put_count[inst_id] % self.STORE_PERIOD == 0):
@@ -955,7 +973,7 @@ class NILM(object):
             return
 
         # TODO: Fixed period for now. Move this to the request, if needed.
-        self._periodic_thread(period=3600)
+        self._periodic_thread(period=self.THREAD_PERIOD)
         atexit.register(self._cancel_periodic_thread)
         resp.status = falcon.HTTP_200
 
