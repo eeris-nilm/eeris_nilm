@@ -1099,7 +1099,7 @@ class LiveHart(object):
                 # Return if no new steady states exist (how?)
                 return
         # Hard way of dealing with discrepancies: Reset background
-        if self.background_active > self.running_avg_power[0]:
+        if self.background_active > 0.8 * self.running_avg_power[0]:
             self._count_bg_overestimation += 1
             if self._count_bg_overestimation > self.OVERESTIMATION_SECONDS:
                 logging.warning(
@@ -1175,7 +1175,7 @@ class LiveHart(object):
         """
         # For thread safety
         with self._lock:
-            logging.debug('Calling update()')
+            # logging.debug('Calling update()')
             if data is not None:
                 self.data = data
             else:
