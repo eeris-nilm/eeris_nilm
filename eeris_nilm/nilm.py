@@ -36,6 +36,7 @@ from eeris_nilm.datasets import eeris
 # TODO: Refactoring to break into eeris-specific and general-purpose components
 # TODO: Support for multiple processes for specified list of installation ids
 # TODO: Edit functionality for appliances
+# TODO: Include checks for config keys
 
 
 class NILM(object):
@@ -156,6 +157,8 @@ class NILM(object):
             self._models[inst_id] = dill.loads(inst_doc['modelHart'])
             if self._models[inst_id]._lock.locked():
                 self._models[inst_id]._lock.release()
+            self._models[inst_id]._clustering_thread = None
+            self._models[inst_id]._detected_appliance = None
             self._model_lock[inst_id] = threading.Lock()
             self._recomputation_active[inst_id] = False
             self._put_count[inst_id] = 0
@@ -299,15 +302,15 @@ class NILM(object):
             # Wait 5 minutes, in case clustering is completed within this time.
             time.sleep(300)
         # Send activations
-        #try:
-        act_result = self._send_activations()
-        logging.debug("Activations report:")
-        logging.debug(act_result)
-        # except Exception as e:
-        #     logging.error("Sending of activations failed!")
-        #     logging.error("Exception type: %s" % (str(type(e))))
-        #     logging.error(e)
-        #     # Continue
+        try:
+            act_result = self._send_activations()
+            logging.debug("Activations report:")
+            logging.debug(act_result)
+        except Exception as e:
+            logging.error("Sending of activations failed!")
+            logging.error("Exception type: %s" % (str(type(e))))
+            logging.error(e)
+            # Continue
         # Submit new thread
         self._p_thread = threading.Timer(period, self._periodic_thread,
                                          kwargs={'period': period})
@@ -434,10 +437,12 @@ class NILM(object):
         port = int(self._config['MQTT']['port'])
         topic_prefix = self._config['MQTT']['topic_prefix']
         if self._config['MQTT']['identity'] == "random":
+            # Option for random identity:
             identity = "nilm" + str(int(np.random.rand() * 1000000))
         else:
             identity = self._config['MQTT']['identity']
-        client = mqtt.Client(identity, clean_session=False)
+        clean_session = self._config['MQTT'].getboolean('clean_session')
+        client = mqtt.Client(identity, clean_session=clean_session)
         client.tls_set(ca_certs=ca, keyfile=key, certfile=crt)
         client.tls_insecure_set(True)
         client.on_connect = on_connect

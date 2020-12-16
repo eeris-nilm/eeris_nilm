@@ -1175,6 +1175,7 @@ class LiveHart(object):
         """
         # For thread safety
         with self._lock:
+            logging.debug('Calling update()')
             if data is not None:
                 self.data = data
             else:
