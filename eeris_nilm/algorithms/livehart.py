@@ -395,7 +395,7 @@ class LiveHart(object):
                 # "drifting" of the signature over time)?
                 a[m].signature = a_new[k].signature.copy()
                 a[m].activations = a_new[k].activations.copy()
-                a[m].last_returned_end_ts = a_new[k].last_returned_end_ts
+                # We want to keep the 'old' last_returned_end_ts
             else:
                 # Unmapped new appliances
                 a[k] = a_new[k]
@@ -1050,6 +1050,7 @@ class LiveHart(object):
         for a in self.live:
             total_estimated += a.signature[0]
         total_estimated += self.background_active
+        self.residual_live = self.running_avg_power - total_estimated
         # Allow for 20% error
         if self.running_avg_power[0] < 0.8 * total_estimated[0]:
             # We may have made a matching error, and an appliance should have
@@ -1058,16 +1059,15 @@ class LiveHart(object):
             # self.residual_live = self.running_avg_power
             self._count_res_overestimation += 1
             if self._count_res_overestimation > self.OVERESTIMATION_SECONDS:
+                logging.info(("Something's wrong with the residual estimation: "
+                              "Background: %f, Residual: %f") %
+                             (self.background_active, self.residual_live[0]))
+                logging.info("Resetting")
                 self.live = []
                 total_estimated = self.background_active
+                self.residual_live[0] = 0.0
         else:
             self._count_res_overestimation = 0
-        self.residual_live = self.running_avg_power - total_estimated
-        if self.residual_live[0] < 0:
-            logging.info(("Something's wrong with the residual estimation: "
-                          "Background: %f, Residual: %f") %
-                         (self.background_active, self.residual_live[0]))
-            self.residual_live[0] = 0.0
 
     def _update_background(self):
         """

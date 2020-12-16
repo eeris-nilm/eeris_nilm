@@ -415,7 +415,7 @@ def consistency(h, n=15):
     return c
 
 
-def live_run(mains, step=3):
+def live_run(mains, step=3, start_thread=False):
     """
     Run the live algorithma and create a live model.
     """
@@ -428,7 +428,7 @@ def live_run(mains, step=3):
         if i % report_step == 0:
             logging.debug("Processing at second %d" % (i))
         y = mains.iloc[i:i+step]
-        model.update(y, start_thread=False)
+        model.update(y, start_thread=start_thread)
     return model
 
 

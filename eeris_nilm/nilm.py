@@ -237,9 +237,10 @@ class NILM(object):
                                                 'found in model' % (a_k))
                                 continue
                             else:
-                                # activations[a_k].sort_values('end',
-                                #                              ascending=True,
-                                #                              ignore_index=True)
+                                # Just making sure
+                                activations[a_k].sort_values('end',
+                                                             ascending=True,
+                                                             ignore_index=True)
                                 a.last_returned_end_ts = \
                                     (activations[a_k])['end'].iloc[-1]
                     logging.debug(
@@ -256,9 +257,10 @@ class NILM(object):
                                             'found in model' % (a_k))
                             continue
                         else:
-                            # activations[a_k].sort_values('end',
-                            #                              ascending=True,
-                            #                              ignore_index=True)
+                            # Just making sure
+                            activations[a_k].sort_values('end',
+                                                         ascending=True,
+                                                         ignore_index=True)
                             a.last_returned_end_ts = \
                                 (activations[a_k])['end'].iloc[-1]
                             logging.debug('Appliance %s: Last return ts: %s'
