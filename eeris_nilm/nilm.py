@@ -234,6 +234,8 @@ class NILM(object):
                     # Everything went well, mark the activations as sent
                     with self._model_lock[inst_id]:
                         for a_k, a in model.appliances.items():
+                            if activations[a_k].empty:
+                                continue
                             # Should never happen
                             if a_k not in activations:
                                 logging.warning('Appliance key %s not'
@@ -255,6 +257,9 @@ class NILM(object):
                 # as sent
                 with self._model_lock[inst_id]:
                     for a_k, a in model.appliances.items():
+                        if activations[a_k].empty:
+                            continue
+                        # Should never happen
                         if a_k not in activations:
                             logging.warning('Appliance key %s not'
                                             'found in model' % (a_k))

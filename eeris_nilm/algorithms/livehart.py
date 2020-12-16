@@ -1073,6 +1073,8 @@ class LiveHart(object):
         """
         Maintain an estimate of the background power consumption
         """
+        # TODO: Fix oscillation between LARGE_POWER and background that often
+        # happens in the initialization phase
         if self._background_last_update is not None and \
            self.data is not None and \
            self.data.shape[0] > 0:
