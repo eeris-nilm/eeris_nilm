@@ -32,10 +32,11 @@ prefix = 'jwt'
 
 # Just select the first installation for the demo.
 inst = config['eeRIS']['inst_ids'].split(',')[0].strip()
-nilm_url = 'http://localhost:9991/nilm/' + inst
-inst_url = 'http://localhost:9991/installation/' + inst + '/model'
+nilm_url = 'http://83.212.104.172:9991/nilm/' + inst
+inst_url = 'http://83.212.104.172:9991/installation/' + inst + '/model'
 
-# Main loop
+# Live
+logging.debub('Testing GET requests for Live')
 for i in range(0, 1000):
     r = requests.get(nilm_url,
                      headers={'Authorization': '%s %s' % (prefix, token)})

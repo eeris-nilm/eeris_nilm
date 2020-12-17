@@ -100,13 +100,13 @@ class NILM(object):
             config['orchestrator']['act_endpoint']
         # Recomputation data URL
         self._computations_url = orchestrator_url + \
-            config['orchestrator']['comp_endpoint']
+            config['orchestrator']['recomputation_endpoint']
         self._notifications_url = orchestrator_url + '/' + \
             config['orchestrator']['notif_endpoint_prefix']
         self._notifications_suffix = \
             config['orchestrator']['notif_endpoint_suffix']
-        self._notifications_past_suffix = \
-            config['orchestrator']['notif_past_suffix']
+        self._notifications_batch_suffix = \
+            config['orchestrator']['notif_batch_suffix']
 
         if config['eeRIS']['input_method'] == 'file':
             self._input_file_prefix = config['FILE']['prefix']
@@ -612,7 +612,7 @@ class NILM(object):
         self._mdb.models.update_one({'meterId': inst_id}, upd)
 
     def _recompute_model(self, inst_id, start_ts, end_ts, step=6 * 3600,
-                         warmup_period=12*3600):
+                         warmup_period=2*3600):
         """
         Recompute a model from data provided by a service. Variations of this
         routine can be created for different data sources.
@@ -643,6 +643,7 @@ class NILM(object):
         if inst_id not in self._model_lock.keys():
             self._model_lock[inst_id] = threading.Lock()
         with self._model_lock[inst_id]:
+            logging.debug('Recomputing model for %s' % (inst_id))
             self._recomputation_active[inst_id] = True
             # Delete model from memory
             self._models.pop(inst_id, None)
@@ -668,6 +669,7 @@ class NILM(object):
             model = self._models[inst_id]
             url = self._computations_url + inst_id
             # Main recomputation loop.
+            logging.debug('Starting recomputation loop')
             rstep = step
             for ts in range(start_ts, end_ts - warmup_period, rstep):
                 # Endpoint expects timestamp in milliseconds since unix epoch
