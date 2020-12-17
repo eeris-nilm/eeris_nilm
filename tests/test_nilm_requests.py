@@ -36,7 +36,7 @@ nilm_url = 'http://83.212.104.172:9991/nilm/' + inst
 inst_url = 'http://83.212.104.172:9991/installation/' + inst + '/model'
 
 # Live
-logging.debub('Testing GET requests for Live')
+logging.debug('Testing GET requests for Live')
 for i in range(0, 1000):
     r = requests.get(nilm_url,
                      headers={'Authorization': '%s %s' % (prefix, token)})

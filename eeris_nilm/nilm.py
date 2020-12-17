@@ -454,8 +454,7 @@ class NILM(object):
         client.on_disconnect = on_disconnect
         client.on_log = on_log
         client.on_message = on_message
-        # clean_start = True to test problem when rebuilding container
-        client.connect(broker, port=port, clean_start=True)
+        client.connect(broker, port=port)
         # Prepare the models
         for inst_id in self._inst_list:
             self._load_or_create_model(inst_id)
