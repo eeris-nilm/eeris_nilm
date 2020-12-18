@@ -153,6 +153,8 @@ class NILM(object):
         if (inst_id not in self._models.keys()):
             inst_doc = self._mdb.models.find_one({"meterId": inst_id})
             if inst_doc is None:
+                logging.debug('Installation %s does not exist in database,'
+                              'creating' % (inst_id))
                 modelstr = dill.dumps(
                     livehart.LiveHart(installation_id=inst_id)
                 )
@@ -163,8 +165,7 @@ class NILM(object):
                             'modelHart': modelstr}
                 self._mdb.models.insert_one(inst_doc)
             self._models[inst_id] = dill.loads(inst_doc['modelHart'])
-            if self._models[inst_id]._lock.locked():
-                self._models[inst_id]._lock.release()
+            self._models[inst_id]._lock = threading.Lock()
             self._models[inst_id]._clustering_thread = None
             self._models[inst_id]._detected_appliance = None
             self._model_lock[inst_id] = threading.Lock()
@@ -444,7 +445,9 @@ class NILM(object):
                 # Persistent storage
                 self._store_model(inst_id)
         # Prepare the models
+        logging.debug('Loading models from database')
         for inst_id in self._inst_list:
+            logging.debug('Loading %s' % (inst_id))
             self._load_or_create_model(inst_id)
         # Connect to MQTT
         ca = self._config['MQTT']['ca']
