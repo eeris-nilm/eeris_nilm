@@ -18,6 +18,7 @@ import falcon
 import pandas as pd
 import numpy as np
 import datetime as dt
+import re
 import dill
 import json
 import paho.mqtt.client as mqtt
@@ -96,17 +97,22 @@ class NILM(object):
         # Orchestrator URL
         orchestrator_url = config['orchestrator']['url']
         # Endpoint to send device activations
-        self._activations_url = orchestrator_url + \
-            config['orchestrator']['act_endpoint']
+        url = orchestrator_url + config['orchestrator']['act_endpoint']
+        self.activations_url = re.sub(r'/+', '/', url)
+        logging.debug('Activations URL: %s' % (self.activations_url))
         # Recomputation data URL
-        self._computations_url = orchestrator_url + \
+        url = orchestrator_url + \
             config['orchestrator']['recomputation_endpoint']
-        self._notifications_url = orchestrator_url + '/' + \
+        self._computations_url = re.sub(r'/+', '/', url)
+        logging.debug(self._computations_url)
+        url = orchestrator_url + '/' + \
             config['orchestrator']['notif_endpoint_prefix']
+        self._notifications_url = re.sub(r'/+', '/', url)
+        logging.debug(self._notifications_url)
         self._notifications_suffix = \
-            config['orchestrator']['notif_endpoint_suffix']
+            re.sub(r'/+', '/', config['orchestrator']['notif_endpoint_suffix'])
         self._notifications_batch_suffix = \
-            config['orchestrator']['notif_batch_suffix']
+            re.sub(r'/+', '/', config['orchestrator']['notif_batch_suffix'])
 
         if config['eeRIS']['input_method'] == 'file':
             self._input_file_prefix = config['FILE']['prefix']
