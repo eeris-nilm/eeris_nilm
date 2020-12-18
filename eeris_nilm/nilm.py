@@ -443,6 +443,10 @@ class NILM(object):
             if (self._put_count[inst_id] % self.STORE_PERIOD == 0):
                 # Persistent storage
                 self._store_model(inst_id)
+        # Prepare the models
+        for inst_id in self._inst_list:
+            self._load_or_create_model(inst_id)
+        # Connect to MQTT
         ca = self._config['MQTT']['ca']
         key = self._config['MQTT']['key']
         crt = self._config['MQTT']['crt']
@@ -463,9 +467,6 @@ class NILM(object):
         client.on_log = on_log
         client.on_message = on_message
         client.connect(broker, port=port, keepalive=30)
-        # Prepare the models
-        for inst_id in self._inst_list:
-            self._load_or_create_model(inst_id)
         # Subscribe
         sub_list = [(topic_prefix + "/" + x, 2) for x in self._inst_list]
         client.subscribe(sub_list)
