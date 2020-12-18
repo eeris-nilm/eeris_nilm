@@ -86,33 +86,35 @@ class NILM(object):
         # Installation ids that we accept for processing
         self._inst_list = \
             [x.strip() for x in config['eeRIS']['inst_ids'].split(",")]
-        # Whether to send requests to orchestrator (off) or just print the
-        # requests (on)
+        # Whether to send requests to orchestrator (True) or just print the
+        # requests (False)
         self._orch_debug_mode = False
         if 'debug_mode' in config['orchestrator'].keys():
-            if config['orchestrator']['debug_mode'] == 'on':
-                self._orch_debug_mode = True
+            self._orch_debug_mode = \
+                config['orchestrator'].getboolean('debug_mode')
         # Orchestrator JWT pre-shared key
         self._orch_jwt_psk = config['orchestrator']['jwt_psk']
         # Orchestrator URL
         orchestrator_url = config['orchestrator']['url']
         # Endpoint to send device activations
         url = orchestrator_url + config['orchestrator']['act_endpoint']
-        self.activations_url = re.sub(r'/+', '/', url)
+        self.activations_url = re.sub(r'[^:]//+', '/', url)
         logging.debug('Activations URL: %s' % (self.activations_url))
         # Recomputation data URL
         url = orchestrator_url + \
             config['orchestrator']['recomputation_endpoint']
-        self._computations_url = re.sub(r'/+', '/', url)
+        self._computations_url = re.sub(r'[^:]//+', '/', url)
         logging.debug(self._computations_url)
         url = orchestrator_url + '/' + \
             config['orchestrator']['notif_endpoint_prefix']
-        self._notifications_url = re.sub(r'/+', '/', url)
+        self._notifications_url = re.sub(r'[^:]//+', '/', url)
         logging.debug(self._notifications_url)
         self._notifications_suffix = \
-            re.sub(r'/+', '/', config['orchestrator']['notif_endpoint_suffix'])
+            re.sub(r'[^:]//+', '/',
+                   config['orchestrator']['notif_endpoint_suffix'])
         self._notifications_batch_suffix = \
-            re.sub(r'/+', '/', config['orchestrator']['notif_batch_suffix'])
+            re.sub(r'[^:]//+', '/',
+                   config['orchestrator']['notif_batch_suffix'])
 
         if config['eeRIS']['input_method'] == 'file':
             self._input_file_prefix = config['FILE']['prefix']
@@ -393,7 +395,7 @@ class NILM(object):
                     logging.info("Waiting 10 seconds...")
                     time.sleep(10)
                     logging.info("Trying to Reconnect...")
-                    client.connect(broker, port=port)
+                    client.connect(broker, port=port, keepalive=30)
                     break
                 except Exception as e:
                     logging.error(e)
@@ -460,7 +462,7 @@ class NILM(object):
         client.on_disconnect = on_disconnect
         client.on_log = on_log
         client.on_message = on_message
-        client.connect(broker, port=port)
+        client.connect(broker, port=port, keepalive=30)
         # Prepare the models
         for inst_id in self._inst_list:
             self._load_or_create_model(inst_id)
