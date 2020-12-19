@@ -79,6 +79,7 @@ class NILM(object):
         self._input_file_prefix = None
         self._file_date_start = None
         self._file_date_end = None
+        self._store_flag = False
 
         # Configuration variables
         # How are we receiving data
@@ -98,15 +99,15 @@ class NILM(object):
         orchestrator_url = config['orchestrator']['url']
         # Endpoint to send device activations
         url = orchestrator_url + config['orchestrator']['act_endpoint']
-        self.activations_url = re.sub(r'[^:]//+', '/', url)
-        logging.debug('Activations URL: %s' % (self.activations_url))
+        self._activations_url = re.sub(r'[^:]//+', '/', url)
+        logging.debug('Activations URL: %s' % (self._activations_url))
         # Recomputation data URL
         url = orchestrator_url + \
             config['orchestrator']['recomputation_endpoint']
         self._computations_url = re.sub(r'[^:]//+', '/', url)
         logging.debug(self._computations_url)
         url = orchestrator_url + '/' + \
-            config['orchestrator']['notif_endpoint_prefix']
+            config['orchestrator']['notif_endpoint_prefix'] + '/'
         self._notifications_url = re.sub(r'[^:]//+', '/', url)
         logging.debug(self._notifications_url)
         self._notifications_suffix = \
@@ -166,8 +167,9 @@ class NILM(object):
                 self._mdb.models.insert_one(inst_doc)
             self._models[inst_id] = dill.loads(inst_doc['modelHart'])
             self._models[inst_id]._lock = threading.Lock()
-            self._models[inst_id]._clustering_thread = None
-            self._models[inst_id]._detected_appliance = None
+            # TODO: This causes huge problems with stored models for some reason
+            # self._models[inst_id]._clustering_thread = None
+            self._models[inst_id].detected_appliance = None
             self._model_lock[inst_id] = threading.Lock()
             self._recomputation_active[inst_id] = False
             self._put_count[inst_id] = 0
@@ -351,9 +353,10 @@ class NILM(object):
         # TODO: Only when expired?
         self._orch_token = utils.get_jwt('nilm', self._orch_jwt_psk)
         if not self._orch_debug_mode:
-            resp = requests.post(self._notifications_url + '/' + inst_id +
-                                 '/' + self._notifications_suffix,
-                                 data=json.dumps(body),
+            url = self._notifications_url + inst_id + '/' + \
+                self._notifications_suffix
+            url = re.sub(r'[^:]//+', '/', url)
+            resp = requests.post(url, data=json.dumps(body),
                                  headers={'Authorization': 'jwt %s' %
                                           (self._orch_token)})
             if not resp.ok:
@@ -441,7 +444,11 @@ class NILM(object):
             # Notify orchestrator for appliance detection
             self._handle_notifications(model)
             self._put_count[inst_id] += 1
-            if (self._put_count[inst_id] % self.STORE_PERIOD == 0):
+            # It is possible that _store_model cannot store, and keeps this to
+            # True afterwards
+            if self._put_count[inst_id] % self.STORE_PERIOD == 0:
+                self._store_flag = True
+            if self._store_flag:
                 # Persistent storage
                 self._store_model(inst_id)
         # Prepare the models
@@ -493,12 +500,15 @@ class NILM(object):
             model.update(data)
             if (i + step) % logging_step == 0:
                 logging.debug('Processed %d seconds' % (i + step))
+            # Model storage
+            if ((self._put_count[inst_id] // step) % self.STORE_PERIOD == 0):
+                self._store_flag = True
+            if self._store_flag:
+                # Persistent storage
+                self._store_model(inst_id)
             time.sleep(0.01)
         self._handle_notifications(model)
         self._put_count[inst_id] += step
-        if (self._put_count[inst_id] % self.STORE_PERIOD == 0):
-            # Persistent storage
-            self._store_model(inst_id)
 
     def _prepare_response_body(self, model):
         """ Wrapper function """
@@ -614,6 +624,11 @@ class NILM(object):
         doing.
         """
         model = self._models[inst_id]
+        if model.is_clustering_active():
+            # Cannot store at this point
+            logging.debug('Clustering thread active for %s, do not store' %
+                          (inst_id))
+            return
         modelstr = dill.dumps(model)
         upd = {'$set': {
             'meterId': inst_id,
@@ -622,6 +637,8 @@ class NILM(object):
             'modelHart': modelstr}
         }
         self._mdb.models.update_one({'meterId': inst_id}, upd)
+        self._store_flag = False
+        # logging.debug('Stored model for %s' % (inst_id))
 
     def _recompute_model(self, inst_id, start_ts, end_ts, step=6 * 3600,
                          warmup_period=2*3600):
@@ -704,7 +721,10 @@ class NILM(object):
                     continue
                 model.update(data, start_thread=False)
                 self._put_count[inst_id] += 1
-                if (self._put_count[inst_id] % self.STORE_PERIOD == 0):
+                if (self._put_count[inst_id] // step) % \
+                   self.STORE_PERIOD == 0:
+                    self._store_flag = True
+                if self._store_flag:
                     # Persistent storage
                     self._store_model(inst_id)
             # Warmup loop (3-seconds step)
@@ -723,7 +743,10 @@ class NILM(object):
                 d = data.iloc[i:i+rstep, :]
                 model.update(d, start_thread=False)
                 self._put_count[inst_id] += 1
-                if (self._put_count[inst_id] % self.STORE_PERIOD == 0):
+                if (self._put_count[inst_id] // rstep) % \
+                   self.STORE_PERIOD == 0:
+                    self._store_flag = True
+                if self._store_flag:
                     # Persistent storage
                     self._store_model(inst_id)
 
@@ -863,6 +886,8 @@ class NILM(object):
         self._handle_notifications(model)
         self._put_count[inst_id] += 1
         if (self._put_count[inst_id] % self.STORE_PERIOD == 0):
+            self._store_flag = True
+        if self._store_flag:
             # Persistent storage
             self._store_model(inst_id)
         # resp.body = 'OK'

@@ -1051,6 +1051,11 @@ class LiveHart(object):
             total_estimated += a.signature[0]
         total_estimated += self.background_active
         self.residual_live = self.running_avg_power - total_estimated
+
+        # It's just the background, we don't reset
+        if len(self.live) == 0:
+            return
+
         # Allow for 20% error
         if self.running_avg_power[0] < 0.8 * total_estimated[0]:
             # We may have made a matching error, and an appliance should have
@@ -1119,6 +1124,15 @@ class LiveHart(object):
         Guess the appliance type using an unnamed hart model
         """
         pass
+
+    def is_clustering_active(self):
+        if self._clustering_thread is None:
+            return False
+        if self._clustering_thread.is_alive():
+            return True
+        else:
+            self._clustering_thread = None
+            return False
 
     def force_clustering(self, start_thread=False, method="dbscan"):
         """
