@@ -153,6 +153,7 @@ class NILM(object):
                              "Ignoring.") % (inst_id))
             return False
 
+    # TODO: Part of these operations should be in livehart (?)
     def _load_or_create_model(self, inst_id):
         # Load or create the model, if not available
         if (inst_id not in self._models.keys()):
@@ -171,8 +172,7 @@ class NILM(object):
                 self._mdb.models.insert_one(inst_doc)
             self._models[inst_id] = dill.loads(inst_doc['modelHart'])
             self._models[inst_id]._lock = threading.Lock()
-            # TODO: This causes huge problems with stored models for some reason
-            # self._models[inst_id]._clustering_thread = None
+            self._models[inst_id]._clustering_thread = None
             self._models[inst_id].detected_appliance = None
             self._model_lock[inst_id] = threading.Lock()
             self._recomputation_active[inst_id] = False
@@ -614,6 +614,26 @@ class NILM(object):
         return body
 
     def _store_model(self, inst_id):
+        """
+        Helper function to store a model in the database.
+        WARNING: This function assumes that the model is already loaded. Also,
+        is NOT thread safe, never call it directly unless you know what you're
+        doing.
+        """
+        model = self._models[inst_id].deepcopy()
+        model.clustering_thread = None
+        model._lock = None
+        modelstr = dill.dumps(model)
+        upd = {'$set': {
+            'meterId': inst_id,
+            'lastUpdate': str(dt.datetime.now()),
+            'debugInstallation': True,
+            'modelHart': modelstr}
+        }
+        self._mdb.models.update_one({'meterId': inst_id}, upd)
+        self._store_flag = False
+
+    def _store_model_DEPRECATED(self, inst_id):
         """
         Helper function to store a model in the database.
         WARNING: This function assumes that the model is already loaded. Also,
