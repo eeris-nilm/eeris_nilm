@@ -18,7 +18,6 @@ import falcon
 import pandas as pd
 import numpy as np
 import datetime as dt
-import re
 import dill
 import json
 import paho.mqtt.client as mqtt
@@ -38,6 +37,8 @@ from eeris_nilm.datasets import eeris
 # TODO: Support for multiple processes for specified list of installation ids
 # TODO: Edit functionality for appliances
 # TODO: Include checks for config keys
+# TODO: Introduce URL checks and remove double slashes '//' that may result from
+#       the configuration strings.
 
 
 class NILM(object):
@@ -98,19 +99,16 @@ class NILM(object):
         # Orchestrator URL
         orchestrator_url = config['orchestrator']['url']
         # Endpoint to send device activations
-        url = orchestrator_url + config['orchestrator']['act_endpoint']
-        # self._activations_url = re.sub(r'[^:]//+', '/', url)
+        url = orchestrator_url + '/' + config['orchestrator']['act_endpoint']
         self._activations_url = url
         logging.debug('Activations URL: %s' % (self._activations_url))
         # Recomputation data URL
-        url = orchestrator_url + \
+        url = orchestrator_url + '/' +\
             config['orchestrator']['recomputation_endpoint']
         self._computations_url = url
-        # self._computations_url = re.sub(r'[^:]//+', '/', url)
         logging.debug(self._computations_url)
         url = orchestrator_url + '/' + \
             config['orchestrator']['notif_endpoint_prefix'] + '/'
-        # self._notifications_url = re.sub(r'[^:]//+', '/', url)
         self._notifications_url = url
         logging.debug(self._notifications_url)
         self._notifications_suffix = \
@@ -232,10 +230,15 @@ class NILM(object):
                 # do this only when token has expired)
                 self._orch_token = utils.get_jwt('nilm', self._orch_jwt_psk)
                 # Change data= to json= depending on the orchestrator setup
-                resp = requests.post(self._activations_url,
-                                     data=json.dumps(body),
-                                     headers={'Authorization': 'jwt %s' %
-                                              (self._orch_token)})
+                try:
+                    resp = requests.post(self._activations_url,
+                                         data=json.dumps(body),
+                                         headers={'Authorization': 'jwt %s' %
+                                                  (self._orch_token)})
+                except Exception as e:
+                    logging.warning("Sending of activations failed!")
+                    logging.warning("Exception type: %s" % (str(type(e))))
+                    logging.warning(e)
                 if not resp.ok:
                     logging.error(
                         "Sending of activation data for %s failed: (%d, %s)"
@@ -324,9 +327,9 @@ class NILM(object):
             logging.debug("Activations report:")
             logging.debug(act_result)
         except Exception as e:
-            logging.error("Sending of activations failed!")
-            logging.error("Exception type: %s" % (str(type(e))))
-            logging.error(e)
+            logging.warning("Sending of activations failed!")
+            logging.warning("Exception type: %s" % (str(type(e))))
+            logging.warning(e)
             # Continue
         # Submit new thread
         self._p_thread = threading.Timer(period, self._periodic_thread,
@@ -356,10 +359,14 @@ class NILM(object):
         if not self._orch_debug_mode:
             url = self._notifications_url + inst_id + '/' + \
                 self._notifications_suffix
-            # url = re.sub(r'[^:]//+', '/', url)
-            resp = requests.post(url, data=json.dumps(body),
-                                 headers={'Authorization': 'jwt %s' %
-                                          (self._orch_token)})
+            try:
+                resp = requests.post(url, data=json.dumps(body),
+                                     headers={'Authorization': 'jwt %s' %
+                                              (self._orch_token)})
+            except Exception as e:
+                logging.warning("Sending of notification failed!")
+                logging.warningn("Exception type: %s" % (str(type(e))))
+                logging.warning(e)
             if not resp.ok:
                 logging.error(
                     "Sending of notification data for %s failed: (%d, %s)"
@@ -403,11 +410,11 @@ class NILM(object):
                     client.connect(broker, port=port, keepalive=30)
                     break
                 except Exception as e:
-                    logging.error(e)
-                    logging.error(
-                        "Error in broker connection attempt. Retrying.")
+                    logging.warning("Error in broker connection"
+                                    "attempt. Retrying.")
+                    logging.warningn("Exception type: %s" % (str(type(e))))
+                    logging.warning(e)
                     counter += 1
-                    continue
 
         def on_message(client, userdata, message):
             x = message.topic.split('/')
