@@ -99,23 +99,24 @@ class NILM(object):
         orchestrator_url = config['orchestrator']['url']
         # Endpoint to send device activations
         url = orchestrator_url + config['orchestrator']['act_endpoint']
-        self._activations_url = re.sub(r'[^:]//+', '/', url)
+        # self._activations_url = re.sub(r'[^:]//+', '/', url)
+        self._activations_url = url
         logging.debug('Activations URL: %s' % (self._activations_url))
         # Recomputation data URL
         url = orchestrator_url + \
             config['orchestrator']['recomputation_endpoint']
-        self._computations_url = re.sub(r'[^:]//+', '/', url)
+        self._computations_url = url
+        # self._computations_url = re.sub(r'[^:]//+', '/', url)
         logging.debug(self._computations_url)
         url = orchestrator_url + '/' + \
             config['orchestrator']['notif_endpoint_prefix'] + '/'
-        self._notifications_url = re.sub(r'[^:]//+', '/', url)
+        # self._notifications_url = re.sub(r'[^:]//+', '/', url)
+        self._notifications_url = url
         logging.debug(self._notifications_url)
         self._notifications_suffix = \
-            re.sub(r'[^:]//+', '/',
-                   config['orchestrator']['notif_endpoint_suffix'])
+            config['orchestrator']['notif_endpoint_suffix']
         self._notifications_batch_suffix = \
-            re.sub(r'[^:]//+', '/',
-                   config['orchestrator']['notif_batch_suffix'])
+            config['orchestrator']['notif_batch_suffix']
 
         if config['eeRIS']['input_method'] == 'file':
             self._input_file_prefix = config['FILE']['prefix']
@@ -355,7 +356,7 @@ class NILM(object):
         if not self._orch_debug_mode:
             url = self._notifications_url + inst_id + '/' + \
                 self._notifications_suffix
-            url = re.sub(r'[^:]//+', '/', url)
+            # url = re.sub(r'[^:]//+', '/', url)
             resp = requests.post(url, data=json.dumps(body),
                                  headers={'Authorization': 'jwt %s' %
                                           (self._orch_token)})
