@@ -613,24 +613,6 @@ class NILM(object):
                             model._yest[-lret:].tolist())
         return body
 
-    def _load_model(self, inst_id):
-        # Load the model, if not loaded already
-        if (inst_id not in self._models.keys()):
-            inst_doc = self._mdb.models.find_one({"meterId": inst_id})
-            if inst_doc is None:
-                raise falcon.HTTPBadRequest("Installation does not exist",
-                                            "You have requested data from " +
-                                            "an installation that does not" +
-                                            "exist")
-            else:
-                self._models[inst_id] = dill.loads(inst_doc['modelHart'])
-                # Make sure threading lock is released
-                if self._models[inst_id]._lock.locked():
-                    self._models[inst_id]._lock.release()
-                self._model_lock[inst_id] = threading.Lock()
-                self._recomputation_active[inst_id] = False
-        return self._models[inst_id]
-
     def _store_model(self, inst_id):
         """
         Helper function to store a model in the database.
@@ -846,12 +828,11 @@ class NILM(object):
         if inst_id not in self._model_lock.keys():
             self._model_lock[inst_id] = threading.Lock()
         with self._model_lock[inst_id]:
-            model = self._load_model(inst_id)
             logging.debug('NILM lock (GET)')
-            resp.body = self._prepare_response_body(model)
+            resp.body = self._prepare_response_body(self._models[inst_id])
             logging.debug('Response body: %s' % (resp.body))
         logging.debug('NILM unlock (GET)')
-        time.sleep(0.05)
+        time.sleep(0.01)
         resp.status = falcon.HTTP_200
 
     def on_put(self, req, resp, inst_id):
@@ -950,9 +931,8 @@ class NILM(object):
         if inst_id not in self._model_lock.keys():
             self._model_lock[inst_id] = threading.Lock()
         with self._model_lock[inst_id]:
-            model = self._load_model(inst_id)
             logging.debug('NILM lock (clustering)')
-            if model.force_clustering(start_thread=True):
+            if self._models[inst_id].force_clustering(start_thread=True):
                 resp.status = falcon.HTTP_200
             else:
                 # Conflict
@@ -973,10 +953,9 @@ class NILM(object):
         if inst_id not in self._model_lock.keys():
             self._model_lock[inst_id] = threading.Lock()
         with self._model_lock[inst_id]:
-            model = self._load_model(inst_id)
             payload = []
             logging.debug('NILM lock (activations)')
-            for a_k, a in model.appliances.items():
+            for a_k, a in self._models[inst_id].appliances.items():
                 for row in a.activations.itertuples():
                     # Energy consumption in kWh
                     consumption = (row.end - row.start).seconds / 3600.0 * \
@@ -1078,7 +1057,7 @@ class NILM(object):
         if inst_id not in self._model_lock.keys():
             self._model_lock[inst_id] = threading.Lock()
         with self._model_lock[inst_id]:
-            model = self._load_model(inst_id)
+            model = self._models[inst_id]
             if appliance_id not in model.appliances:
                 logging.warning("Appliance id %s not found in model")
                 self._model_lock[inst_id].release()
