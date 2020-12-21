@@ -1105,7 +1105,7 @@ class LiveHart(object):
             else:
                 # Return if no new steady states exist (how?)
                 return
-        # Hard way of dealing with discrepancies: Reset background
+        # Current background estimate seems to be inaccurate.
         if self.background_active > 0.8 * self.running_avg_power[0]:
             self._count_bg_overestimation += 1
             if self._count_bg_overestimation > self.OVERESTIMATION_SECONDS:
@@ -1114,8 +1114,8 @@ class LiveHart(object):
                      "Background: %f, Residual: %f") %
                     (self.background_active, self.residual_live[0])
                 )
-                self.background_active = self.LARGE_POWER
-                self._background_last_update = None
+                # self.background_active = self.LARGE_POWER
+                # self._background_last_update = None
         else:
             self._count_bg_overestimation = 0
 
@@ -1124,6 +1124,15 @@ class LiveHart(object):
         Guess the appliance type using an unnamed hart model
         """
         pass
+
+    def is_background_overestimated(self):
+        """
+        Returns True if current background has been overestimated.
+        """
+        if self._count_bg_overestimation > 10:
+            return True
+        else:
+            return False
 
     def is_clustering_active(self):
         if self._clustering_thread is None:

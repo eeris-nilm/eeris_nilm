@@ -549,7 +549,7 @@ class NILM(object):
             return json.dumps(body_d)
         payload = []
         # Insert background
-        if model.background_active < 10000.0:
+        if not model.is_background_overestimated():
             app_d = {"_id": '000000000000000000000001',
                      "name": "Background",
                      "type": "background",
@@ -613,7 +613,9 @@ class NILM(object):
                             model._yest[-lret:].tolist())
         return body
 
-    def _store_model(self, inst_id):
+    # TODO: This is probably a better implementation, should replace current
+    # after testing.
+    def _store_model_NEXT_VERSION(self, inst_id):
         """
         Helper function to store a model in the database.
         WARNING: This function assumes that the model is already loaded. Also,
@@ -633,7 +635,8 @@ class NILM(object):
         self._mdb.models.update_one({'meterId': inst_id}, upd)
         self._store_flag = False
 
-    def _store_model_DEPRECATED(self, inst_id):
+    # TODO: This will probably be deprecated
+    def _store_model(self, inst_id):
         """
         Helper function to store a model in the database.
         WARNING: This function assumes that the model is already loaded. Also,
@@ -1060,6 +1063,8 @@ class NILM(object):
         created. Expects parameters appliance_id, name and category, all
         strings.
         """
+        logging.debug('Received appliance naming event for installation %s' %
+                      (inst_id))
         if not self._accept_inst(inst_id):
             resp.status = falcon.HTTP_400
             resp.body = "Installation not in list for this NILM instance."
