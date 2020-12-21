@@ -115,6 +115,11 @@ class NILM(object):
             config['orchestrator']['notif_endpoint_suffix']
         self._notifications_batch_suffix = \
             config['orchestrator']['notif_batch_suffix']
+        # Prepare the models (redundant?)
+        logging.debug('Loading models from database')
+        for inst_id in self._inst_list:
+            logging.debug('Loading %s' % (inst_id))
+            self._load_or_create_model(inst_id)
 
         if config['eeRIS']['input_method'] == 'file':
             self._input_file_prefix = config['FILE']['prefix']
@@ -448,7 +453,7 @@ class NILM(object):
                 # Process the data
                 model.update(data)
             logging.debug('NILM unlock (MQTT message)')
-            time.sleep(0.01)
+            time.sleep(0.05)
             # Notify orchestrator for appliance detection
             self._handle_notifications(model)
             self._put_count[inst_id] += 1
@@ -459,8 +464,8 @@ class NILM(object):
             if self._store_flag:
                 # Persistent storage
                 self._store_model(inst_id)
-        # Prepare the models
-        logging.debug('Loading models from database')
+        # Prepare the models (As it stands, it shouldn't do anything)
+        logging.debug('Loading models from database (MQTT) thread')
         for inst_id in self._inst_list:
             logging.debug('Loading %s' % (inst_id))
             self._load_or_create_model(inst_id)
@@ -488,6 +493,8 @@ class NILM(object):
         # Subscribe
         sub_list = [(topic_prefix + "/" + x, 2) for x in self._inst_list]
         client.subscribe(sub_list)
+        # Sleep for a while, while the system initializes
+        time.sleep(10)
         client.loop_forever()
 
     def _process_file(self):
@@ -844,7 +851,7 @@ class NILM(object):
             resp.body = self._prepare_response_body(model)
             logging.debug('Response body: %s' % (resp.body))
         logging.debug('NILM unlock (GET)')
-        time.sleep(0.01)
+        time.sleep(0.05)
         resp.status = falcon.HTTP_200
 
     def on_put(self, req, resp, inst_id):

@@ -1131,6 +1131,8 @@ class LiveHart(object):
         if self._clustering_thread.is_alive():
             return True
         else:
+            # There are problems storing the thread via dill, so we set this to
+            # None.
             self._clustering_thread = None
             return False
 
