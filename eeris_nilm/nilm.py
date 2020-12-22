@@ -1097,7 +1097,7 @@ class NILM(object):
             model.appliances[appliance_id].verified = True
             # Also update live appliance
             live_idx = next(item for item in model.live if
-                            item['appliance_id'] == appliance_id)
+                            item.appliance_id == appliance_id)
             if live_idx is None:
                 logging.warning(
                     "Notifications: Appliance id %s not in the"
