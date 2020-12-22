@@ -736,7 +736,12 @@ class NILM(object):
                 r = utils.request_with_retry(url, data=json.dumps(params),
                                              request='get',
                                              token=self._orch_token)
-                data = utils.get_data_from_cenote_response(r)
+                if r.ok:
+                    data = utils.get_data_from_cenote_response(r)
+                else:
+                    logging.warning("Request failed: (%s, %s)" % (r.status_code,
+                                                                  r.text))
+                    data = None
                 if data is None:
                     continue
                 model.update(data, start_thread=False)
