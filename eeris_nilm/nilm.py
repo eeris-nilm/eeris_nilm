@@ -413,6 +413,8 @@ class NILM(object):
                     time.sleep(10)
                     logging.info("Trying to Reconnect...")
                     client.connect(broker, port=port, keepalive=30)
+                    # Subscribe
+                    client.subscribe(sub_list)
                     break
                 except Exception as e:
                     logging.warning("Error in broker connection"
@@ -452,18 +454,19 @@ class NILM(object):
                 logging.debug('NILM lock (MQTT message)')
                 # Process the data
                 model.update(data)
+                self._put_count[inst_id] += 1
             logging.debug('NILM unlock (MQTT message)')
             time.sleep(0.01)
             # Notify orchestrator for appliance detection
             self._handle_notifications(model)
-            self._put_count[inst_id] += 1
             # It is possible that _store_model cannot store, and keeps this to
             # True afterwards
             if self._put_count[inst_id] % self.STORE_PERIOD == 0:
                 self._store_flag = True
             if self._store_flag:
-                # Persistent storage
-                self._store_model(inst_id)
+                with self._model_lock[inst_id]:
+                    # Persistent storage
+                    self._store_model(inst_id)
         # Prepare the models (As it stands, it shouldn't do anything)
         logging.debug('Loading models from database (MQTT) thread')
         for inst_id in self._inst_list:
@@ -762,19 +765,21 @@ class NILM(object):
             self._orch_token = utils.get_jwt('nilm', self._orch_jwt_psk)
             r = utils.request_with_retry(url, params, request='get',
                                          token=self._orch_token)
-            data = utils.get_data_from_cenote_response(r)
-            rstep = 3  # Hardcoded
-            for i in range(0, data.shape[0], rstep):
-                d = data.iloc[i:i+rstep, :]
-                model.update(d, start_thread=False)
-                self._put_count[inst_id] += 1
-                if (self._put_count[inst_id] // rstep) % \
-                   self.STORE_PERIOD == 0:
-                    self._store_flag = True
-                if self._store_flag:
-                    # Persistent storage
-                    self._store_model(inst_id)
-
+            if not r.ok:
+                data = None
+            else:
+                data = utils.get_data_from_cenote_response(r)
+                rstep = 3  # Hardcoded
+                for i in range(0, data.shape[0], rstep):
+                    d = data.iloc[i:i+rstep, :]
+                    model.update(d, start_thread=False)
+                    self._put_count[inst_id] += 1
+                    if (self._put_count[inst_id] // rstep) % \
+                       self.STORE_PERIOD == 0:
+                        self._store_flag = True
+                    if self._store_flag:
+                        # Persistent storage
+                        self._store_model(inst_id)
             # Name the appliances based on past user resposes
             url = self._notifications_url + '/' + inst_id + '/' + \
                 self._notifications_past_suffix
@@ -905,15 +910,16 @@ class NILM(object):
             logging.debug('NILM lock (PUT)')
             # Process the data
             model.update(data)
+            self._put_count[inst_id] += 1
         logging.debug('NILM unlock (PUT)')
         time.sleep(0.01)
         self._handle_notifications(model)
-        self._put_count[inst_id] += 1
         if (self._put_count[inst_id] % self.STORE_PERIOD == 0):
             self._store_flag = True
         if self._store_flag:
             # Persistent storage
-            self._store_model(inst_id)
+            with self._model_lock[inst_id]:
+                self._store_model(inst_id)
         # resp.body = 'OK'
         # lret = data.shape[0]
         resp.body = self._prepare_response_body(model)
