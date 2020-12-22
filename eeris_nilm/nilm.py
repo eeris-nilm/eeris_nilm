@@ -1101,11 +1101,11 @@ class NILM(object):
             if live_app is None:
                 logging.warning(
                     "Notifications: Appliance id %s not in the"
-                    "list of live appliances")
+                    "list of live appliances" % (live_app.appliance_id))
             else:
-                model.live[live_app].name = name
-                model.live[live_app].category = category
-                model.live[live_app].verified = True
+                live_app.name = name
+                live_app.category = category
+                live_app.verified = True
             logging.info(("Installation: %s. Renamed appliance "
                           "%s from %s with "
                           "category %s to %s with category %s") %
