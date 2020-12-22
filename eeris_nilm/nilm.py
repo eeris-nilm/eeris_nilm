@@ -136,7 +136,7 @@ class NILM(object):
 
         # Initialize thread for sending activation data periodically (if thread
         # = True in the eeRIS configuration section)
-        time.sleep(self.THREAD_PERIOD)
+        time.sleep(10)
         thread = config['eeRIS'].getboolean('thread')
         if thread:
             self._periodic_thread(period=self.THREAD_PERIOD)
@@ -453,7 +453,7 @@ class NILM(object):
                 # Process the data
                 model.update(data)
             logging.debug('NILM unlock (MQTT message)')
-            time.sleep(0.05)
+            time.sleep(0.01)
             # Notify orchestrator for appliance detection
             self._handle_notifications(model)
             self._put_count[inst_id] += 1
@@ -493,8 +493,8 @@ class NILM(object):
         # Subscribe
         sub_list = [(topic_prefix + "/" + x, 2) for x in self._inst_list]
         client.subscribe(sub_list)
-        # Sleep for a while, while the system initializes
-        time.sleep(10)
+        # These timers may not be needed
+        time.sleep(3)
         client.loop_forever()
 
     def _process_file(self):
