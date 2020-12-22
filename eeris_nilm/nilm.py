@@ -716,7 +716,7 @@ class NILM(object):
                 self._models[inst_doc]._lock.release()
             self._put_count[inst_id] = 0
             model = self._models[inst_id]
-            url = self._computations_url + inst_id
+            url = self._computations_url + '/' + inst_id
             # Main recomputation loop.
             logging.debug('Starting recomputation loop')
             rstep = step

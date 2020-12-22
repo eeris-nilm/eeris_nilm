@@ -443,6 +443,7 @@ def get_jwt(user, secret):
         'nbf': now,
         'exp': now + timedelta(seconds=1*60*60)
     }
-
+    # decode should be removed when upgrading to pyjwt 2.0.0 (currently with
+    # 1.7.0)
     jwt_token = jwt.encode(payload, secret, algorithm='HS256').decode('utf-8')
     return jwt_token
