@@ -52,7 +52,7 @@ class NILM(object):
     STORE_PERIOD = 10
     # THREAD_PERIOD = 3600
     THREAD_PERIOD = 300
-    MAX_REC_BUFFER = 3 * 24 * 3600
+    MAX_REC_BUFFER = 24 * 3600
 
     def __init__(self, mdb, config, response='cenote'):
         """
@@ -459,7 +459,7 @@ class NILM(object):
                     # to MAX_REC_BUFFER entries
                     logging.debug('Recomputation is active, data in buffer')
                     if self._recomputation_buffer is None:
-                        self._recomputation_buffer
+                        self._recomputation_buffer = data
                     else:
                         if len(self._recomputation_buffer.index) > \
                            self.MAX_REC_BUFFER:
@@ -469,7 +469,8 @@ class NILM(object):
                             self._recomputation_buffer.append(data)
                 else:
                     model = self._models[inst_id]
-                    if not self._recomputation_buffer.empty:
+                    if self._recomputation_buffer is not None:
+                        # There's data in the buffer, process these first
                         logging.debug('Processing buffer data')
                         model.update(self._recomputation_buffer)
                         self._recomputation_buffer = None
@@ -483,7 +484,8 @@ class NILM(object):
             logging.debug('NILM unlock (MQTT message)')
             time.sleep(0.01)
             # Notify orchestrator for appliance detection
-            self._handle_notifications(model)
+            if not self._recomputation_active[inst_id]:
+                self._handle_notifications(model)
             # It is possible that _store_model cannot store, and keeps this to
             # True afterwards
             if self._put_count[inst_id] % self.STORE_PERIOD == 0:
@@ -761,8 +763,8 @@ class NILM(object):
             self._put_count[inst_id] = 0
             model = self._models[inst_id]
             url = self._computations_url + '/' + inst_id
-            # Main recomputation loop.
 
+        # Main recomputation loop.
         logging.debug('Starting recomputation loop')
         rstep = step
         for ts in range(start_ts, end_ts - warmup_period, rstep):
