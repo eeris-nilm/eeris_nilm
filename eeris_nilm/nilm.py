@@ -52,6 +52,7 @@ class NILM(object):
     STORE_PERIOD = 10
     # THREAD_PERIOD = 3600
     THREAD_PERIOD = 300
+    MAX_REC_BUFFER = 3 * 24 * 3600
 
     def __init__(self, mdb, config, response='cenote'):
         """
@@ -75,6 +76,7 @@ class NILM(object):
         self._model_lock = dict()
         self._recomputation_active = dict()
         self._recomputation_thread = None
+        self._recomputation_buffer = None
         self._mqtt_thread = None
         self._p_thread = None
         self._input_file_prefix = None
@@ -452,11 +454,32 @@ class NILM(object):
             data.index.name = None
             # Submit for processing by the model
             with self._model_lock[inst_id]:
-                model = self._models[inst_id]
-                logging.debug('NILM lock (MQTT message)')
-                # Process the data
-                model.update(data)
-                self._put_count[inst_id] += 1
+                if self._recomputation_active[inst_id]:
+                    # If recomputation is active, keep data in a buffer for up
+                    # to MAX_REC_BUFFER entries
+                    logging.debug('Recomputation is active, data in buffer')
+                    if self._recomputation_buffer is None:
+                        self._recomputation_buffer
+                    else:
+                        if len(self._recomputation_buffer.index) > \
+                           self.MAX_REC_BUFFER:
+                            logging.debug('Max buffer size reached, ignoring')
+                            pass
+                        else:
+                            self._recomputation_buffer.append(data)
+                else:
+                    model = self._models[inst_id]
+                    if not self._recomputation_buffer.empty:
+                        logging.debug('Processing buffer data')
+                        model.update(self._recomputation_buffer)
+                        self._recomputation_buffer = None
+                        # TODO: ?
+                        # self._put_count[inst_id] = 1
+                    else:
+                        logging.debug('NILM lock (MQTT message)')
+                        # Process the data
+                        model.update(data)
+                        self._put_count[inst_id] += 1
             logging.debug('NILM unlock (MQTT message)')
             time.sleep(0.01)
             # Notify orchestrator for appliance detection
@@ -714,8 +737,6 @@ class NILM(object):
 
         logging.debug('Recomputing model for %s' % (inst_id))
         self._recomputation_active[inst_id] = True
-        # While recomputation takes place, other threads (incl. MQTT) cannot
-        # acquire the model lock
         with self._model_lock[inst_id]:
             # Delete model from memory
             self._models.pop(inst_id, None)
@@ -740,34 +761,35 @@ class NILM(object):
             self._put_count[inst_id] = 0
             model = self._models[inst_id]
             url = self._computations_url + '/' + inst_id
-
             # Main recomputation loop.
-            logging.debug('Starting recomputation loop')
-            rstep = step
-            for ts in range(start_ts, end_ts - warmup_period, rstep):
-                # Endpoint expects timestamp in milliseconds since unix epoch
-                st = ts * 1000
-                if ts + rstep < end_ts:
-                    et = (ts + rstep) * 1000
-                else:
-                    et = end_ts * 1000
 
-                params = {
-                    "start": st,
-                    "end": et
-                }
-                self._orch_token = utils.get_jwt('nilm', self._orch_jwt_psk)
-                r = utils.request_with_retry(url, data=json.dumps(params),
-                                             request='get',
-                                             token=self._orch_token)
-                if r.ok:
-                    data = utils.get_data_from_cenote_response(r)
-                else:
-                    logging.warning("Request failed: (%s, %s)" % (r.status_code,
-                                                                  r.text))
-                    data = None
-                if data is None:
-                    continue
+        logging.debug('Starting recomputation loop')
+        rstep = step
+        for ts in range(start_ts, end_ts - warmup_period, rstep):
+            # Endpoint expects timestamp in milliseconds since unix epoch
+            st = ts * 1000
+            if ts + rstep < end_ts:
+                et = (ts + rstep) * 1000
+            else:
+                et = end_ts * 1000
+
+            params = {
+                "start": st,
+                "end": et
+            }
+            self._orch_token = utils.get_jwt('nilm', self._orch_jwt_psk)
+            r = utils.request_with_retry(url, data=json.dumps(params),
+                                         request='get',
+                                         token=self._orch_token)
+            if r.ok:
+                data = utils.get_data_from_cenote_response(r)
+            else:
+                logging.warning("Request failed: (%s, %s)" % (r.status_code,
+                                                              r.text))
+                data = None
+            if data is None:
+                continue
+            with self._model_lock[inst_id]:
                 model.update(data, start_thread=False)
                 self._put_count[inst_id] += 1
                 if (self._put_count[inst_id] // step) % \
@@ -776,24 +798,24 @@ class NILM(object):
                 if self._store_flag:
                     # Persistent storage
                     self._store_model(inst_id)
-                time.sleep(0.01)
 
-            st = (end_ts - warmup_period + 1) * 1000
-            et = end_ts * 1000
-            params = {
-                "start": st,
-                "end": et
-            }
-            self._orch_token = utils.get_jwt('nilm', self._orch_jwt_psk)
-            r = utils.request_with_retry(url, params, request='get',
-                                         token=self._orch_token)
-            if not r.ok:
-                data = None
-            else:
-                data = utils.get_data_from_cenote_response(r)
-                rstep = 3  # Hardcoded
-                for i in range(0, data.shape[0], rstep):
-                    d = data.iloc[i:i+rstep, :]
+        st = (end_ts - warmup_period + 1) * 1000
+        et = end_ts * 1000
+        params = {
+            "start": st,
+            "end": et
+        }
+        self._orch_token = utils.get_jwt('nilm', self._orch_jwt_psk)
+        r = utils.request_with_retry(url, params, request='get',
+                                     token=self._orch_token)
+        if not r.ok:
+            data = None
+        else:
+            data = utils.get_data_from_cenote_response(r)
+            rstep = 3  # Hardcoded
+            for i in range(0, data.shape[0], rstep):
+                d = data.iloc[i:i+rstep, :]
+                with self._model_lock[inst_id]:
                     model.update(d, start_thread=False)
                     self._put_count[inst_id] += 1
                     if (self._put_count[inst_id] // rstep) % \
@@ -802,22 +824,23 @@ class NILM(object):
                     if self._store_flag:
                         # Persistent storage
                         self._store_model(inst_id)
-                    time.sleep(0.01)
-            # Name the appliances based on past user resposes
-            url = self._notifications_url + '/' + inst_id + '/' + \
-                self._notifications_batch_suffix
-            self._orch_token = utils.get_jwt('nilm', self._orch_jwt_psk)
-            r = utils.request_with_retry(url, token=self._orch_token)
-            if not r.ok:
-                logging.error(
-                    "Error in receiving data for %s failed: (%d, %s)"
-                    % (inst_id, r.status_code, r.text)
-                )
-            else:
-                # Everything went well, process the past notification responses
-                logging.debug("Notifications for %s received successfully,"
-                              "processing.", inst_id)
+        # Name the appliances based on past user resposes
+        url = self._notifications_url + '/' + inst_id + '/' + \
+            self._notifications_batch_suffix
+        self._orch_token = utils.get_jwt('nilm', self._orch_jwt_psk)
+        r = utils.request_with_retry(url, token=self._orch_token)
+        if not r.ok:
+            logging.error(
+                "Error in receiving data for %s failed: (%d, %s)"
+                % (inst_id, r.status_code, r.text)
+            )
+        else:
+            # Everything went well, process the past notification responses
+            logging.debug("Notifications for %s received successfully,"
+                          "processing.", inst_id)
+            with self._model_lock[inst_id]:
                 self._recomputation_appliance_naming(inst_id, r.text)
+        with self._model_lock[inst_id]:
             self._recomputation_active[inst_id] = False
 
     def _recomputation_appliance_naming(self, inst_id, naming):
