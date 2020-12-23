@@ -76,7 +76,7 @@ class NILM(object):
         self._model_lock = dict()
         self._recomputation_active = dict()
         self._recomputation_thread = None
-        self._recomputation_buffer = None
+        self._recomputation_buffer = dict()
         self._mqtt_thread = None
         self._p_thread = None
         self._input_file_prefix = None
@@ -178,6 +178,7 @@ class NILM(object):
             self._models[inst_id].detected_appliance = None
             self._model_lock[inst_id] = threading.Lock()
             self._recomputation_active[inst_id] = False
+            self._recomputation_buffer[inst_id] = None
             self._put_count[inst_id] = 0
         if inst_id not in self._model_lock.keys():
             self._model_lock[inst_id] = threading.Lock()
@@ -458,22 +459,22 @@ class NILM(object):
                     # If recomputation is active, keep data in a buffer for up
                     # to MAX_REC_BUFFER entries
                     logging.debug('Recomputation is active, data in buffer')
-                    if self._recomputation_buffer is None:
-                        self._recomputation_buffer = data
+                    if self._recomputation_buffer[inst_id] is None:
+                        self._recomputation_buffer[inst_id] = data
                     else:
-                        if len(self._recomputation_buffer.index) > \
+                        if len(self._recomputation_buffer[inst_id].index) > \
                            self.MAX_REC_BUFFER:
                             logging.debug('Max buffer size reached, ignoring')
                             pass
                         else:
-                            self._recomputation_buffer.append(data)
+                            self._recomputation_buffer[inst_id].append(data)
                 else:
                     model = self._models[inst_id]
-                    if self._recomputation_buffer is not None:
+                    if self._recomputation_buffer[inst_id] is not None:
                         # There's data in the buffer, process these first
                         logging.debug('Processing buffer data')
-                        model.update(self._recomputation_buffer)
-                        self._recomputation_buffer = None
+                        model.update(self._recomputation_buffer[inst_id])
+                        self._recomputation_buffer[inst_id] = None
                         # TODO: ?
                         # self._put_count[inst_id] = 1
                     else:
