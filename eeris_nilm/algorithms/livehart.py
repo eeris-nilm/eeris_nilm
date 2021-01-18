@@ -775,6 +775,11 @@ class LiveHart(object):
         tde = self._ymatch.index[-1] - match.iloc[0]['end']
         end = tde.days * 3600 * 24 + tde.seconds
         active = match.iloc[0]['active']
+        # It is possible in cases where there are issues with communication with
+        # NILM that start/end exceed the size of _ymatch. In that case just
+        # return false.
+        if start > end or start > self._ymatch['active'].shape[0]:
+            return False
         self._ymatch['active'][-start:-end] += active
         # Hardcoded parameters. Can be more strict.
         check_threshold = max([0.2 * active, 100.0])

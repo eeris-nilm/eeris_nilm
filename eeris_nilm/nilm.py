@@ -398,35 +398,27 @@ class NILM(object):
         def on_log(client, userdata, level, buf):
             print(buf)
 
-        # TODO: Does this work out-of-the-box automatically?
-        # def on_disconnect(client, userdata, rc):
-        #     print("MQTT client disconnected" + mqtt.connack_string(rc))
-
-        #     if rc != 0:
-        #         logging.error(
-        #             'Unexpected MQTT disconnect. Attempting to reconnect')
-        #     else:
-        #         logging.error('MQTT disconnected, rc value:' + str(rc))
-
-        #     counter = 0
-        #     while counter < 10:
-        #         try:
-        #             broker = self._config['MQTT']['broker']
-        #             port = int(self._config['MQTT']['port'])
-        #             logging.info("Waiting 10 seconds...")
-        #             time.sleep(10)
-        #             logging.info("Trying to Reconnect...")
-        #             client.connect(broker, port=port, keepalive=30)
-        #             # Subscribe
-        #             logging.info("Subscribing...")
-        #             client.subscribe(sub_list)
-        #             break
-        #         except Exception as e:
-        #             logging.warning("Error in broker connection"
-        #                             "attempt. Retrying.")
-        #             logging.warningn("Exception type: %s" % (str(type(e))))
-        #             logging.warning(e)
-        #             counter += 1
+        def on_disconnect(client, userdata, rc):
+            logging.info("Disconnected With Result Code: %s " % rc)
+            if rc != 0:
+                logging.info('Unexpected MQTT disconnection. Will'
+                             'auto-reconnect')
+                retries = 1
+                success = False
+            while not success:
+                try:
+                    broker = self._config['MQTT']['broker']
+                    port = int(self._config['MQTT']['port'])
+                    logging.info("Trying to Reconnect")
+                    client.connect(broker, port)
+                    success = True
+                except Exception as e:
+                    wait = retries * 10
+                    logging.info("Error in Retrying to Connect with Broker")
+                    logging.warning("Exception type: %s" % (str(type(e))))
+                    logging.warning(e)
+                    time.sleep(wait)
+                    retries += 1
 
         def on_message(client, userdata, message):
             x = message.topic.split('/')
