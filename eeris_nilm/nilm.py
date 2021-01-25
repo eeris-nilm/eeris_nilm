@@ -405,6 +405,10 @@ class NILM(object):
                              'auto-reconnect')
                 retries = 1
                 success = False
+            # Disable immediate clustering after reconnect
+            # TODO: Is there a better way?
+            for m in self._models:
+                m._last_clustering_ts = datetime.datetime.now()
             while not success:
                 try:
                     broker = self._config['MQTT']['broker']
@@ -470,11 +474,13 @@ class NILM(object):
                         # TODO: ?
                         # self._put_count[inst_id] = 1
                     else:
-                        logging.debug('NILM lock (MQTT message)')
+                        logging.debug('NILM lock (MQTT message) %s %s' %
+                                      (inst_id, datetime.datetime.now()))
                         # Process the data
                         model.update(data)
                         self._put_count[inst_id] += 1
-            logging.debug('NILM unlock (MQTT message)')
+            logging.debug('NILM unlock (MQTT message) %s %s' % (inst_id,
+                                                                datetime.datetime.now()))
             time.sleep(0.01)
             # Notify orchestrator for appliance detection
             if not self._recomputation_active[inst_id]:
@@ -492,6 +498,9 @@ class NILM(object):
         for inst_id in self._inst_list:
             logging.debug('Loading %s' % (inst_id))
             self._load_or_create_model(inst_id)
+            # Avoid clustering immediately after model load.
+            # TODO: Better way to do this?
+            self._models[inst_id] = datetime.datetime.now()
         # Connect to MQTT
         ca = self._config['MQTT']['ca']
         key = self._config['MQTT']['key']
@@ -499,20 +508,23 @@ class NILM(object):
         broker = self._config['MQTT']['broker']
         port = int(self._config['MQTT']['port'])
         topic_prefix = self._config['MQTT']['topic_prefix']
-        if self._config['MQTT']['identity'] == "random":
-            # Option for random identity:
-            identity = "nilm" + str(int(np.random.rand() * 1000000))
-        else:
-            identity = self._config['MQTT']['identity']
+        # This causes problems with reconnections, for now just revert to an
+        # empty id
+        # if self._config['MQTT']['identity'] == "random":
+        #     # Option for random identity:
+        #     identity = "nilm" + str(int(np.random.rand() * 1000000))
+        # else:
+        #     identity = self._config['MQTT']['identity']
         clean_session = self._config['MQTT'].getboolean('clean_session')
-        client = mqtt.Client(identity, clean_session=clean_session)
+        # client = mqtt.Client(identity, clean_session=clean_session)
+        client = mqtt.Client(clean_session=clean_session)
         client.tls_set(ca_certs=ca, keyfile=key, certfile=crt)
         client.tls_insecure_set(True)
         client.on_connect = on_connect
         # client.on_disconnect = on_disconnect
         client.on_log = on_log
         client.on_message = on_message
-        client.connect(broker, port=port, keepalive=30)
+        client.connect(broker, port=port, keepalive=180)
         # Subscribe
         sub_list = [(topic_prefix + "/" + x, 2) for x in self._inst_list]
         client.subscribe(sub_list)

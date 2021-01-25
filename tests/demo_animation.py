@@ -201,8 +201,8 @@ if dataset == 'redd':
     # redd dataset
     p = 'tests/data/redd/house_1'
     house = os.path.basename(p)
-    date_start = '2011-04-18T01:00'
-    date_end = '2011-04-30T23:59'
+    date_start = '2011-04-18T17:00'
+    date_end = '2011-04-20T23:59'
     model_path_r = 'tests/data/model_redd_' + house + '.dill'
     model_path_w = 'tests/data/model_redd_' + house + '.dill'
 elif dataset == 'eco':
@@ -223,7 +223,7 @@ elif dataset == 'cenote':
     model_path_w = 'tests/data/model_cenote.dill'
 elif dataset == 'eeris':
     p = 'tests/data/eeris/5e05d5c83e442d4f78db036f_'
-    date_start = '2020-03-01T00:00'
+    date_start = '2020-03-01T17:00'
     date_end = '2020-11-30T23:59'
     inst_id = '5e05d5c83e442d4f78db036f'
     model_path_r = 'tests/data/model_eeris.dill'
