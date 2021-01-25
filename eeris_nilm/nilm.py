@@ -407,8 +407,9 @@ class NILM(object):
                 success = False
             # Disable immediate clustering after reconnect
             # TODO: Is there a better way?
-            for m in self._models:
-                m._last_clustering_ts = datetime.datetime.now()
+            # DELETE THIS
+            #for m in self._models:
+            #    m._last_clustering_ts = datetime.datetime.now()
             while not success:
                 try:
                     broker = self._config['MQTT']['broker']
@@ -500,7 +501,8 @@ class NILM(object):
             self._load_or_create_model(inst_id)
             # Avoid clustering immediately after model load.
             # TODO: Better way to do this?
-            self._models[inst_id] = datetime.datetime.now()
+            # DELETE THIS
+            # self._models[inst_id] = datetime.datetime.now()
         # Connect to MQTT
         ca = self._config['MQTT']['ca']
         key = self._config['MQTT']['key']
