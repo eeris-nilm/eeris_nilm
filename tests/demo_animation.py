@@ -188,7 +188,7 @@ else:
 # Edit these to fit your setup.
 
 # The real-time NILM loop runs every 'step' measurements
-step = 3
+step = 5
 # Whether to display on the screen or save to a video file. Change this to True
 # to save a file
 # save = True
@@ -201,8 +201,8 @@ if dataset == 'redd':
     # redd dataset
     p = 'tests/data/redd/house_1'
     house = os.path.basename(p)
-    date_start = '2011-04-18T01:00'
-    date_end = '2011-04-30T23:59'
+    date_start = '2011-04-18T17:00'
+    date_end = '2011-04-20T23:59'
     model_path_r = 'tests/data/model_redd_' + house + '.dill'
     model_path_w = 'tests/data/model_redd_' + house + '.dill'
 elif dataset == 'eco':
@@ -222,10 +222,9 @@ elif dataset == 'cenote':
     model_path_r = 'tests/data/model_cenote.dill'
     model_path_w = 'tests/data/model_cenote.dill'
 elif dataset == 'eeris':
-    p = ('tests/data/eeRIS/snapshot_07042020/124B0011EEE909/124B0002CC3CCD'
-         '/124B0011EEE909_124B0002CC3CCD_')
-    date_start = '2020-03-01T00:00'
-    date_end = '2020-03-31T23:59'
+    p = 'tests/data/eeris/5e05d5c83e442d4f78db036f_'
+    date_start = '2020-03-01T17:00'
+    date_end = '2020-11-30T23:59'
     inst_id = '5e05d5c83e442d4f78db036f'
     model_path_r = 'tests/data/model_eeris.dill'
     model_path_w = 'tests/data/model_eeris.dill'

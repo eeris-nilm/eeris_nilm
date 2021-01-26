@@ -18,9 +18,11 @@ house = os.path.basename(path)
 date_start = None
 date_end = None
 step = 7
+# Set this to True only for debugging threads:
+start_thread = False
 data, labels = redd.read_redd(path, date_start=date_start,
                               date_end=date_end)
-model = evaluation.live_run(data['mains'], step=step)
+model = evaluation.live_run(data['mains'], step=step, start_thread=start_thread)
 outfile = os.path.join('tests/data/redd_live/', house + '_live_hist.dill')
 with open(outfile, 'wb') as f:
     dill.dump(model.live_history, f)

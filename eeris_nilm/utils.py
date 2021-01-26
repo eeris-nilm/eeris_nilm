@@ -18,8 +18,10 @@ import numpy as np
 import scipy
 import pandas as pd
 import json
+import jwt
 import requests
 import time
+from datetime import datetime, timedelta
 
 
 def get_segments(signal, mask, only_true=True):
@@ -366,14 +368,13 @@ def get_data_from_cenote_response(resp):
     Convert response from cenote system to pandas.DataFrame that can be used by
     eeris_nilm.
     """
-    if resp.status_code != 200:
+    if not resp.ok:
         return None
     rd = json.loads(resp.text)
     data = pd.DataFrame(rd['results'])
     if data.shape[0] == 0:
         return None
-    data = data.drop(['installationid', 'uuid', 'cenote$created_at',
-                      'cenote$id'], axis=1)
+    data = data.drop(['uuid', 'cenote$created_at', 'cenote$id'], axis=1)
     data['cenote$timestamp'] = pd.to_datetime(data['cenote$timestamp'],
                                               unit='ms', origin='unix')
     data = data.rename(columns={'cenote$timestamp': 'timestamp'})
@@ -382,10 +383,12 @@ def get_data_from_cenote_response(resp):
     return data
 
 
-def request_with_retry(url, params, request='get', requests_limit=3600):
+def request_with_retry(url, params=None, data=None, json=None, request='get',
+                       requests_limit=3600, token=None):
     """
-    Calls requests with parameters url and params. If it fails, it retries
-    requests_limit times (with a sleep time of 1s in-between).
+    Calls requests with parameters url and params, data or json (whichever is
+    not None). If it fails, it retries requests_limit times (with a sleep time
+    of 1s in-between).
     """
     n_r = 0
     f = None
@@ -401,12 +404,19 @@ def request_with_retry(url, params, request='get', requests_limit=3600):
         raise ValueError("Current implementation does not handle %s requests",
                          request)
 
+    args = {}
+    if data is not None:
+        args['data'] = data
+    if json is not None:
+        args['json'] = json
+
     while n_r < requests_limit:
         try:
-            if request == 'get':
-                r = f(url, params)
-            elif request == 'put':
-                r = f(url, params)
+            if token is not None:
+                r = f(url, params, **args, headers={'Authorization': 'jwt %s' %
+                                                    (token)})
+            else:
+                r = f(url, params, **args)
             break
         except requests.exceptions.RequestException as e:
             print("Request error: " + e)
@@ -417,3 +427,22 @@ def request_with_retry(url, params, request='get', requests_limit=3600):
             print("Retrying... %d / %d" % (n_r, requests_limit))
             time.sleep(1.0)
     return r
+
+# Other utilities
+
+
+def get_jwt(user, secret):
+    """
+    Helper that generates a JWT given a username and a secret.
+    """
+    now = datetime.utcnow()
+    payload = {
+        'user': user,
+        'iat': now,
+        'nbf': now,
+        'exp': now + timedelta(seconds=1*60*60)
+    }
+    # decode should be removed when upgrading to pyjwt 2.0.0 (currently with
+    # 1.7.0)
+    jwt_token = jwt.encode(payload, secret, algorithm='HS256').decode('utf-8')
+    return jwt_token

@@ -388,7 +388,8 @@ class Appliance(object):
         self.num_states = 2  # Default is two-state appliance
         self.signature = signature  # Should have num_states-1 rows
         self.final = False  # We are allowed to modify signature
-        self.verified = False  # Not sure it is actually a new appliance
+        # Used to check if appliance has been assigned a name by the user.
+        self.verified = False
         self.inactive = False  # Has it not been used for a long time?
         self.live = False  # Is this a "live" appliance?
         self.p_signature = signature  # Previous signature (for running average)
@@ -450,10 +451,11 @@ class Appliance(object):
         else:
             idx = self.activations['end'] > self.last_returned_end_ts
             activations = self.activations.loc[idx, :]
+        # Just making sure
         activations = activations.sort_values('end', ascending=True,
                                               ignore_index=True)
         if update_ts:
-            self.last_returned_end_ts = activations[-1]['end']
+            self.last_returned_end_ts = activations['end'].iloc[-1]
         return activations
 
     def reset_activations_track(self):

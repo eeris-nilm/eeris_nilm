@@ -47,7 +47,7 @@ class LiveHart(object):
     # little
 
     # ID for particular algorithm version
-    VERSION = "0.0"
+    VERSION = "0.1"
 
     # Some of the variables below could be parameters
     BUFFER_SIZE_SECONDS = 24 * 3600
@@ -147,6 +147,8 @@ class LiveHart(object):
         # For online edge detection
         self._online_edge_detected = False
         self._online_edge = np.array([0.0, 0.0])
+        # For cluster labels
+        self._max_cluster_label = 0
 
         # List of live appliances
         self.live = []
@@ -161,12 +163,17 @@ class LiveHart(object):
         self._store_live = store_live
         self.live_history = pd.DataFrame([], columns=['start', 'end', 'name',
                                                       'active', 'reactive'])
+        # Variable to trigger potential applicance naming notifications to the
+        # end-users. It stores the detected appliances that were activated for
+        # naming
+        self.detected_appliance = None
 
         # Other variables - needed for sanity checks
         self.background_active = self.LARGE_POWER
         self._background_last_update = None
+        self._count_bg_overestimation = 0
         self.residual_live = np.array([0.0, 0.0])
-        self._count_overestimation = 0
+        self._count_res_overestimation = 0
 
         # Variables for handling threads. For now, just a lock.
         self._clustering_thread = None
@@ -384,11 +391,18 @@ class LiveHart(object):
             if k in mapping.keys():
                 m = mapping[k]
                 a[m] = self.appliances[m]
+                # TODO: Should we copy the new signature (this could lead to
+                # "drifting" of the signature over time)?
+                a[m].signature = a_new[k].signature.copy()
                 a[m].activations = a_new[k].activations.copy()
-                a[m].last_returned_end_ts = a_new[k].last_returned_end_ts
+                # We want to keep the 'old' last_returned_end_ts
             else:
                 # Unmapped new appliances
                 a[k] = a_new[k]
+                # Update names of new appliances to avoid confusion with old
+                # names (e.g., both new and old appliance named 'Cluster 1')
+                a[k].name = 'Cluster %d' % (self._max_cluster_label + 1)
+                self._max_cluster_label += 1
         self.appliances = a
 
     def _sync_appliances_live(self, mapping):
@@ -400,7 +414,11 @@ class LiveHart(object):
         for k in self.appliances_live.keys():
             if k in mapping.keys():
                 m = mapping[k]
-                a[m].live = True
+                # TODO: .live signifies whether an appliance has been detected
+                # through the clustering procedure (even if it's a copy of an
+                # appliance from self.appliances). We therefore don't set it to
+                # true here. TODO: Verify this.
+                # a[m].live = True
                 a[m].start_ts = self.appliances_live[k].start_ts
                 # In case the appliance is operating, replace with new live.
                 try:
@@ -414,13 +432,15 @@ class LiveHart(object):
                 a[k] = self.appliances_live[k]
         self.appliances_live = a
 
+    # TODO: delete this?
     def _sync_appliances_live_copy(self):
         """
         The live appliances are just a copy of the clustered appliances.
         """
         a = self.appliances.copy()
-        for k in a.keys():
-            a[k].live = True
+        # See comment on sync_appliances live
+        # for k in a.keys():
+        #    a[k].live = True
         self.appliances_live = a
 
     def _sync_appliances_live_1_DEPRECATED(self, mapping):
@@ -442,7 +462,7 @@ class LiveHart(object):
                 # Has the appliance already been mapped?
                 # TODO: This is a hack. Better solutions? Is this an edge case?
                 if m in mapped_keys:
-                    logging.DEBUG(("Appliance %s (%s) already mapped, ignoring"
+                    logging.debug(("Appliance %s (%s) already mapped, ignoring"
                                    "mapping of %s") %
                                   (a_new[m].name, m,
                                    self.appliances_live[k].name),
@@ -545,7 +565,6 @@ class LiveHart(object):
             raise ValueError(("Unrecognized clustering method %s. Possible "
                               "values are \"dbscan\" and \"mean-shift\"") %
                              method)
-
         # We need to make sure that devices that were already detected
         # previously keep the same name.
         # First build a temporary list of appliances
@@ -572,15 +591,44 @@ class LiveHart(object):
         logging.debug('Finished static clustering at %s' % (debug_t_end))
         logging.debug('Total clustering time: %s seconds' %
                       (debug_t_diff.seconds))
+        logging.debug('Clustering complete. Appliances before mapping:')
+        for _, a in appliances.items():
+            logging.debug("------------------------\n"
+                          "ID: %s\n"
+                          "Signature: %s\n"
+                          "Name: %s\n"
+                          "Category: %s\n"
+                          % (a.appliance_id, a.signature, a.name,
+                             a.category))
+        logging.debug('Old appliances:')
+        for _, a in self.appliances.items():
+            logging.debug("------------------------\n"
+                          "ID: %s\n"
+                          "Signature: %s\n"
+                          "Name: %s\n"
+                          "Category: %s\n"
+                          % (a.appliance_id, a.signature, a.name,
+                             a.category))
         with self._lock:
             if not self.appliances:
                 # First time we detect appliances
                 self.appliances = appliances
+                self._max_cluster_label = np.max(u_labels)
             else:
                 # Map to previous.
                 mapping = appliance.appliance_mapping(appliances,
                                                       self.appliances)
                 self._sync_appliances(appliances, mapping)
+            logging.debug('Clustering complete. Current list of appliances:')
+            for _, a in self.appliances.items():
+                logging.debug("------------------------\n"
+                              "ID: %s\n"
+                              "Signature: %s\n"
+                              "Name: %s\n"
+                              "Category: %s\n"
+                              % (a.appliance_id, a.signature, a.name,
+                                 a.category))
+
             # Sync live appliances.
             # Option 1: Just copy the clusters.
             # self._sync_appliances_live_copy()
@@ -592,9 +640,6 @@ class LiveHart(object):
             self._sync_appliances_live(mapping)
             # Set timestamp
             self._last_clustering_ts = clustering_start_ts
-
-            logging.debug('Clustering complete. Current list of appliances:')
-            logging.debug(str(self.appliances))
 
     def _clean_buffers(self):
         """
@@ -730,6 +775,11 @@ class LiveHart(object):
         tde = self._ymatch.index[-1] - match.iloc[0]['end']
         end = tde.days * 3600 * 24 + tde.seconds
         active = match.iloc[0]['active']
+        # It is possible in cases where there are issues with communication with
+        # NILM that start/end exceed the size of _ymatch. In that case just
+        # return false.
+        if start > end or start > self._ymatch['active'].shape[0]:
+            return False
         self._ymatch['active'][-start:-end] += active
         # Hardcoded parameters. Can be more strict.
         check_threshold = max([0.2 * active, 100.0])
@@ -750,6 +800,7 @@ class LiveHart(object):
         display of eeRIS. Note that this works only in 'online' mode (small
         batches of samples at a time).
         """
+        self.detected_appliance = None
         if not self._online_edge_detected:
             # No edge was detected
             if not self.live:
@@ -775,7 +826,7 @@ class LiveHart(object):
         if e[0] > 0:
             appliance_id = str(bson.objectid.ObjectId())
             name = 'Live %s' % (str(self._appliance_display_id))
-            # TODO: Determine appliance category
+            # TODO: Determine appliance category.
             category = 'unknown'
             a = appliance.Appliance(appliance_id, name, category,
                                     signature=e.reshape(-1, 1).T)
@@ -790,6 +841,8 @@ class LiveHart(object):
                 # Increase display id for next appliance
                 self._appliance_display_id += 1
             else:
+                # TODO: Trigger notification if appliance is detected (Cluster
+                # X)
                 # Match with previous and update signature with average
                 self.live.insert(0, candidates[0][0])
                 # 2x because we take both the rising and dropping edge
@@ -798,6 +851,16 @@ class LiveHart(object):
                 s_a = a.signature[0, :]
                 avg_power = n / (n + 1.0) * s + 1.0 / (n + 1.0) * s_a
                 self.live[0].signature[0, :] = avg_power
+                # Register detection to support notifications to the users for
+                # appliance naming.
+                self.detected_appliance = None
+                # TODO: Restrict to unknown category only? Any additional
+                # constraints?
+                if not candidates[0][0].live:
+                    self.detected_appliance = candidates[0][0]
+                    logging.debug("Detected appliance %s. Sending notification "
+                                  "request" %
+                                  (str(self.detected_appliance.signature)))
             # For activations
             self.live[0].start_ts = self._edge_start_ts
             # Done
@@ -992,29 +1055,36 @@ class LiveHart(object):
         for a in self.live:
             total_estimated += a.signature[0]
         total_estimated += self.background_active
+        self.residual_live = self.running_avg_power - total_estimated
+
+        # It's just the background, we don't reset
+        if len(self.live) == 0:
+            return
+
         # Allow for 20% error
         if self.running_avg_power[0] < 0.8 * total_estimated[0]:
             # We may have made a matching error, and an appliance should have
             # been switched off. Heuristic solution here.
             # self.live = []
             # self.residual_live = self.running_avg_power
-            self._count_overestimation += 1
-            if self._count_overestimation > self.OVERESTIMATION_SECONDS:
+            self._count_res_overestimation += 1
+            if self._count_res_overestimation > self.OVERESTIMATION_SECONDS:
+                logging.info(("Something's wrong with the residual estimation: "
+                              "Background: %f, Residual: %f") %
+                             (self.background_active, self.residual_live[0]))
+                logging.info("Resetting")
                 self.live = []
                 total_estimated = self.background_active
+                self.residual_live[0] = 0.0
         else:
-            self._count_overestimation = 0
-        self.residual_live = self.running_avg_power - total_estimated
-        if self.residual_live[0] < 0:
-            logging.debug(("Something's wrong with the residual estimation:"
-                           "Background: %f, Residual: %f") %
-                          (self.background_active, self.residual_live[0]))
-            self.residual_live[0] = 0.0
+            self._count_res_overestimation = 0
 
     def _update_background(self):
         """
         Maintain an estimate of the background power consumption
         """
+        # TODO: Fix oscillation between LARGE_POWER and background that often
+        # happens in the initialization phase
         if self._background_last_update is not None and \
            self.data is not None and \
            self.data.shape[0] > 0:
@@ -1040,19 +1110,45 @@ class LiveHart(object):
             else:
                 # Return if no new steady states exist (how?)
                 return
-        # Hard way of dealing with discrepancies: Reset background
-        if self.background_active > self.running_avg_power[0]:
-            logging.debug(("Something's wrong with the background estimation:"
-                           "Background: %f, Residual: %f") %
-                          (self.background_active, self.residual_live[0]))
-            self.background_active = self.LARGE_POWER
-            self._background_last_update = None
+        # Current background estimate seems to be inaccurate.
+        if self.background_active > 0.8 * self.running_avg_power[0]:
+            self._count_bg_overestimation += 1
+            if self._count_bg_overestimation > self.OVERESTIMATION_SECONDS:
+                logging.warning(
+                    ("Something's wrong with the background estimation:"
+                     "Background: %f, Residual: %f") %
+                    (self.background_active, self.residual_live[0])
+                )
+                # self.background_active = self.LARGE_POWER
+                # self._background_last_update = None
+        else:
+            self._count_bg_overestimation = 0
 
     def _guess_type(self):
         """
         Guess the appliance type using an unnamed hart model
         """
         pass
+
+    def is_background_overestimated(self):
+        """
+        Returns True if current background has been overestimated.
+        """
+        if self._count_bg_overestimation > 10:
+            return True
+        else:
+            return False
+
+    def is_clustering_active(self):
+        if self._clustering_thread is None:
+            return False
+        if self._clustering_thread.is_alive():
+            return True
+        else:
+            # There are problems storing the thread via dill, so we set this to
+            # None.
+            self._clustering_thread = None
+            return False
 
     def force_clustering(self, start_thread=False, method="dbscan"):
         """
@@ -1111,6 +1207,7 @@ class LiveHart(object):
         """
         # For thread safety
         with self._lock:
+            # logging.debug('Calling update()')
             if data is not None:
                 self.data = data
             else:

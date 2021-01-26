@@ -59,7 +59,8 @@ def create_app(conf_file):
     ca_key = /path/to/CA.crt # Certificate Authority path
     client_pass = [secret] # Client key passphrase
     topic_prefix = eeris # mqtt topic prefix to subscribe
-    identity = eeris_nilm_local # Identity for mqtt client
+    identity = eeris_nilm_local # Identity for mqtt client. If "random" then a
+                                # random client identity is generated each time
 
     [orchestrator]
     url = [url] # eeRIS orchestrator URL
@@ -76,7 +77,7 @@ def create_app(conf_file):
     config.read(conf_file)
 
     # DB connection
-    logging.debug("Connecting to database")
+    logging.info("Connecting to database")
     mclient = pymongo.MongoClient(config['eeRIS']['dburl'])
     dbname = config['eeRIS']['dbname']
     dblist = mclient.list_database_names()
@@ -99,7 +100,7 @@ def create_app(conf_file):
     # api = falcon.API()
 
     # NILM
-    logging.debug("Setting up connections")
+    logging.info("Setting up connections")
     nilm = eeris_nilm.nilm.NILM(mdb, config)
     api.add_route('/nilm/{inst_id}', nilm)
     api.add_route('/nilm/{inst_id}/clustering', nilm, suffix='clustering')
@@ -110,11 +111,12 @@ def create_app(conf_file):
     api.add_route('/nilm/{inst_id}/appliance_name',
                   nilm, suffix='appliance_name')
     # Installation manager (for database management - limited functionality)
-    inst_ids = [x.strip() for x in config['eeRIS']['inst_ids'].split(",")]
-    inst_manager = eeris_nilm.installation.\
-        InstallationManager(mdb, inst_list=inst_ids)
-    api.add_route('/installation/{inst_id}/model', inst_manager, suffix='model')
-    logging.debug("Ready")
+    # inst_ids = [x.strip() for x in config['eeRIS']['inst_ids'].split(",")]
+    # inst_manager = eeris_nilm.installation.\
+    #     InstallationManager(mdb, inst_list=inst_ids)
+    # api.add_route('/installation/{inst_id}/model', inst_manager,
+    # suffix='model')
+    logging.info("Ready")
     return api
 
 
