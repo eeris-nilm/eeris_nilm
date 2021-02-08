@@ -49,10 +49,10 @@ class NILM(object):
 
     # How often (after how many updates) should we store the model
     # persistently?
-    STORE_PERIOD = 10
+    STORE_PERIOD = 100
     # THREAD_PERIOD = 3600
-    THREAD_PERIOD = 300
-    MAX_REC_BUFFER = 24 * 3600
+    THREAD_PERIOD = 900
+    MAX_REC_BUFFER = 12 * 3600
 
     def __init__(self, mdb, config, response='cenote'):
         """
@@ -1167,7 +1167,7 @@ class NILM(object):
             if live_app is None:
                 logging.warning(
                     "Notifications: Appliance id %s not in the"
-                    "list of live appliances" % (live_app.appliance_id))
+                    "list of live appliances" % (appliance_id))
             else:
                 live_app.name = name
                 live_app.category = category
