@@ -358,8 +358,8 @@ class NILM(object):
             "_id": model.detected_appliance.appliance_id,
             "name": model.detected_appliance.name,
             "type": model.detected_appliance.category,
-            "active": model.detected_appliance.signature[0],
-            "reactive": model.detected_appliance.signature[1],
+            "active": model.detected_appliance.signature[0, 0],
+            "reactive": model.detected_appliance.signature[0, 1],
             "status": "true"
         }
         inst_id = model.installation_id
