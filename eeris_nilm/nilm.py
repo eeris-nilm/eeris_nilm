@@ -375,7 +375,7 @@ class NILM(object):
                                               (self._orch_token)})
             except Exception as e:
                 logging.warning("Sending of notification failed!")
-                logging.warningn("Exception type: %s" % (str(type(e))))
+                logging.warning("Exception type: %s" % (str(type(e))))
                 logging.warning(e)
             if not resp.ok:
                 logging.error(
@@ -1152,7 +1152,7 @@ class NILM(object):
         with self._model_lock[inst_id]:
             model = self._models[inst_id]
             if appliance_id not in model.appliances:
-                logging.warning("Appliance id %s not found in model")
+                logging.warning("Appliance id %s not found in model", appliance_id)
                 self._model_lock[inst_id].release()
                 time.sleep(0.01)
                 resp.status = falcon.HTTP_400
