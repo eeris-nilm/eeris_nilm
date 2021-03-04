@@ -131,7 +131,6 @@ class NILM(object):
                                                  name='file', daemon=True)
             self._file_thread.start()
         if config['eeRIS']['input_method'] == 'mqtt':
-            self._client = None
             self._mqtt_thread = threading.Thread(target=self._mqtt, name='mqtt',
                                                  daemon=True)
             self._mqtt_thread.start()
