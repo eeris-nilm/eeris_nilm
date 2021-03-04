@@ -131,6 +131,7 @@ class NILM(object):
                                                  name='file', daemon=True)
             self._file_thread.start()
         if config['eeRIS']['input_method'] == 'mqtt':
+            self._client = None
             self._mqtt_thread = threading.Thread(target=self._mqtt, name='mqtt',
                                                  daemon=True)
             self._mqtt_thread.start()
@@ -208,7 +209,8 @@ class NILM(object):
                 for a_k, a in model.appliances.items():
                     # For now, do not mark activations as sent (we'll do that
                     # only if data have been successfully sent)
-                    activations[a_k] = a.return_new_activations(update_ts=False)
+                    activations[a_k] = a.return_new_activations(
+                        update_ts=False)
                     for row in activations[a_k].itertuples():
                         # Energy consumption in kWh
                         # TODO: Correct consumption by reversing power
@@ -410,17 +412,18 @@ class NILM(object):
             # Disable immediate clustering after reconnect
             # TODO: Is there a better way?
             # DELETE THIS
-            #for m in self._models:
+            # for m in self._models:
             #    m._last_clustering_ts = datetime.datetime.now()
             while not success:
                 try:
                     broker = self._config['MQTT']['broker']
                     port = int(self._config['MQTT']['port'])
                     logging.info("Trying to Reconnect")
+                    client.reinitialise(clean_session=True)
                     client.connect(broker, port)
                     success = True
                 except Exception as e:
-                    wait = retries * 10
+                    wait = retries * 60
                     logging.info("Error in Retrying to Connect with Broker")
                     logging.warning("Exception type: %s" % (str(type(e))))
                     logging.warning(e)
@@ -1152,7 +1155,8 @@ class NILM(object):
         with self._model_lock[inst_id]:
             model = self._models[inst_id]
             if appliance_id not in model.appliances:
-                logging.warning("Appliance id %s not found in model", appliance_id)
+                logging.warning(
+                    "Appliance id %s not found in model", appliance_id)
                 self._model_lock[inst_id].release()
                 time.sleep(0.01)
                 resp.status = falcon.HTTP_400
