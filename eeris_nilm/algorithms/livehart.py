@@ -264,7 +264,8 @@ class LiveHart(object):
             self._ymatch = self._ymatch.append(d, sort=True)
             if not self.batch_mode:
                 start_ts = self._ymatch.index[-1] - \
-                    pd.offsets.Second(self.MAX_MATCH_THRESHOLD_DAYS*3600*24 - 1)
+                    pd.offsets.Second(
+                        self.MAX_MATCH_THRESHOLD_DAYS*3600*24 - 1)
                 self._ymatch = self._ymatch.loc[self._ymatch.index >= start_ts]
 
     def _reset(self):
@@ -729,9 +730,11 @@ class LiveHart(object):
                     continue
                 # Do they match? (use negative of edge for e2, since it is the
                 # negative part)
-                e1 = e.iloc[i][['active', 'reactive']].values.astype(np.float64)
+                e1 = e.iloc[i][['active', 'reactive']
+                               ].values.astype(np.float64)
                 e2 = \
-                    -e.iloc[j][['active', 'reactive']].values.astype(np.float64)
+                    -e.iloc[j][['active', 'reactive']
+                               ].values.astype(np.float64)
                 try:
                     match, d = utils.match_power(e1, e2, active_only=True,
                                                  t=self.MATCH_THRESHOLD)
@@ -1111,7 +1114,7 @@ class LiveHart(object):
                 # Return if no new steady states exist (how?)
                 return
         # Current background estimate seems to be inaccurate.
-        if self.background_active > 0.8 * self.running_avg_power[0]:
+        if self.background_active > 1.2 * self.running_avg_power[0]:
             self._count_bg_overestimation += 1
             if self._count_bg_overestimation > self.OVERESTIMATION_SECONDS:
                 logging.warning(

@@ -605,7 +605,15 @@ class NILM(object):
             return json.dumps(body_d)
         payload = []
         # Insert background
-        if not model.is_background_overestimated():
+        if model.is_background_overestimated():
+            app_d = {"_id": '000000000000000000000002',
+                     "name": "Other",
+                     "type": "residual",
+                     "active": model.running_avg_power[0],
+                     "reactive": model.running_avg_power[1]}
+            d = {"data": app_d, "timestamp": ts}
+            payload.append(d)
+        else:
             app_d = {"_id": '000000000000000000000001',
                      "name": "Background",
                      "type": "background",
@@ -613,6 +621,7 @@ class NILM(object):
                      "reactive": 0.0}
             d = {"data": app_d, "timestamp": ts}
             payload.append(d)
+
         for i in range(len(model.live)):
             app = model.live[i]
             app_d = {"_id": app.appliance_id,
