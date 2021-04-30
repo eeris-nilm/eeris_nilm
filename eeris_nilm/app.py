@@ -24,7 +24,6 @@ import eeris_nilm.nilm
 import eeris_nilm.installation
 
 
-# TODO: Authentication
 def create_app(conf_file):
     """
     Main web application.
@@ -37,44 +36,21 @@ def create_app(conf_file):
     ----------
 
     conf_file: String
-    Configuration file in ini format, with the following structure:
+    Configuration file in ini format. See file ini/example_eeris.ini for an
+    example.
 
-    [eeRIS]
-    dburl = mongodb://localhost:27017/ # URL for the local mongodb
-    dbname = eeris  # Database name
-    #input_method = rest  # Input method can be "rest" or "mqtt"
-    input_method = mqtt
-    inst_ids = [id1], [id2], ... # Which installations should we monitor?
-    response = cenote  # Response format. Possible values are cenote and debug
-    thread = False  # Initiate a periodic thread to send activations. If false,
-                    # then these should be sent manually.
-
-    [REST]
-    jwt_psk = [secret]  # jwt pre-shared key
-
-    [MQTT]
-    broker = [url] # URL to the mqtt broker
-    crt = /path/to/client.crt # Client certificate path
-    key = /path/to/client.key # Client certificate key path
-    ca_key = /path/to/CA.crt # Certificate Authority path
-    client_pass = [secret] # Client key passphrase
-    topic_prefix = eeris # mqtt topic prefix to subscribe
-    identity = eeris_nilm_local # Identity for mqtt client. If "random" then a
-                                # random client identity is generated each time
-
-    [orchestrator]
-    url = [url] # eeRIS orchestrator URL
-    act_endpoint = historical/events   # Activations service URL (for
-                                       # submitting detected device activations
-                                       # for storage). If none, then a JSON with
-                                       # the activations is printed in the
-                                       # stdout, for debugging purposes.
-    comp_endpoint = historical/   # Endpoint for requesting batch historical
-                                  # data for recomputation purposes
     """
     # Config file parsing
     config = configparser.ConfigParser()
     config.read(conf_file)
+
+    # Set logging level
+    if 'loglevel' not in config['eeRIS'].keys():
+        loglevel = logging.DEBUG
+    else:
+        loglevel = eval('logging.' + config['eeRIS']['loglevel'])
+
+    logging.setLevel(loglevel)
 
     # DB connection
     logging.info("Connecting to database")

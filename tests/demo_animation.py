@@ -115,20 +115,31 @@ class Demo(object):
         self.line_est.set_data([], [])
         return (self.line_active, self.line_est)
 
+    # def data_gen(self):
+    #     self.power = self.power.loc[self.power.index > self.start_ts].dropna()
+    #     end = self.power.shape[0] - self.power.shape[0] % self.step
+    #     for i in range(0, end, self.step):
+    #         data = self.power.iloc[i:i+self.step]
+    #         yield self.start_sec + i, data
     def data_gen(self):
         self.power = self.power.loc[self.power.index > self.start_ts].dropna()
-        end = self.power.shape[0] - self.power.shape[0] % self.step
-        for i in range(0, end, self.step):
-            data = self.power.iloc[i:i+self.step]
-            yield self.start_sec + i, data
+        end = self.power.index[-1]
+        t = self.start_ts - datetime.timedelta(seconds=self.step)
+        while t < end:
+            t += datetime.timedelta(seconds=self.step)
+            tnext = t+datetime.timedelta(seconds=self.step)
+            idx = (t - self.start_ts).seconds
+            data = self.power.loc[t:tnext]
+            yield idx, data
 
     def __call__(self, data):
         t, y = data
         self.model.update(y)
         # Update lines
-        duration = (y.index[-1] - y.index[0]).seconds + 1
-        self.xdata.extend(list(range(t, t + duration)))
-        self.ydata.extend(y['active'].values.tolist())
+        data = self.model._buffer
+        self.xdata = (data.index.hour * 3200 + data.index.minute *
+                      60 + data.index.second).values.tolist()
+        self.ydata = (data['active'].values.tolist())
         lim = min(len(self.xdata), self.time_window)
         self.line_active.set_data(self.xdata[-lim:], self.ydata[-lim:])
         ydisp = self.model._yest[-lim:].tolist()
@@ -192,9 +203,9 @@ step = 5
 # Whether to display on the screen or save to a video file. Change this to True
 # to save a file
 # save = True
-save = False
+save = True
 # In case save is 'True' specify the output directory (which must exist)
-video_out = 'demo_videos'
+video_out = 'demo_videos/'
 inst_id = None
 if dataset == 'redd':
     # Replace this with your path to house_1 of the downloaded and extracted
@@ -223,8 +234,9 @@ elif dataset == 'cenote':
     model_path_w = 'tests/data/model_cenote.dill'
 elif dataset == 'eeris':
     p = 'tests/data/eeris/5e05d5c83e442d4f78db036f_'
-    date_start = '2020-03-01T17:00'
-    date_end = '2020-11-30T23:59'
+    date_start = '2020-12-01T00:00'
+    date_end = '2020-12-13T23:59'
+    # date_end = '2020-12-01T23:59'
     inst_id = '5e05d5c83e442d4f78db036f'
     model_path_r = 'tests/data/model_eeris.dill'
     model_path_w = 'tests/data/model_eeris.dill'
