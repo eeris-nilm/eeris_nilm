@@ -103,22 +103,22 @@ class NILM(object):
         # Endpoint to send device activations
         url = orchestrator_url + '/' + config['orchestrator']['act_endpoint']
         self._activations_url = url
-        logging.debug('Activations URL: %s' % (self._activations_url))
+        logging.info('Activations URL: %s' % (self._activations_url))
         # Recomputation data URL
         url = orchestrator_url + '/' +\
             config['orchestrator']['recomputation_endpoint']
         self._computations_url = url
-        logging.debug(self._computations_url)
+        logging.info(self._computations_url)
         url = orchestrator_url + '/' + \
             config['orchestrator']['notif_endpoint_prefix'] + '/'
         self._notifications_url = url
-        logging.debug(self._notifications_url)
+        logging.info(self._notifications_url)
         self._notifications_suffix = \
             config['orchestrator']['notif_endpoint_suffix']
         self._notifications_batch_suffix = \
             config['orchestrator']['notif_batch_suffix']
         # Prepare the models (redundant?)
-        logging.debug('Loading models from database')
+        logging.info('Loading models from database')
         for inst_id in self._inst_list:
             logging.debug('Loading %s' % (inst_id))
             self._load_or_create_model(inst_id)
@@ -199,7 +199,7 @@ class NILM(object):
         logging.info("Sending activations")
         ret = {}
         for inst_id, model in self._models.items():
-            logging.debug("Activations for installation %s" % (inst_id))
+            logging.info("Activations for installation %s" % (inst_id))
             if inst_id not in self._model_lock.keys():
                 self._model_lock[inst_id] = threading.Lock()
             with self._model_lock[inst_id]:
@@ -208,7 +208,8 @@ class NILM(object):
                 for a_k, a in model.appliances.items():
                     # For now, do not mark activations as sent (we'll do that
                     # only if data have been successfully sent)
-                    activations[a_k] = a.return_new_activations(update_ts=False)
+                    activations[a_k] = a.return_new_activations(
+                        update_ts=False)
                     for row in activations[a_k].itertuples():
                         # Energy consumption in kWh
                         # TODO: Correct consumption by reversing power
@@ -271,7 +272,7 @@ class NILM(object):
                                                              ignore_index=True)
                                 a.last_returned_end_ts = \
                                     (activations[a_k])['end'].iloc[-1]
-                    logging.debug(
+                    logging.info(
                         "Activations for %s sent successfully", inst_id)
                     ret[inst_id] = \
                         json.dumps(body)
@@ -302,7 +303,7 @@ class NILM(object):
                     "Activations for %s marked (debug)", inst_id)
                 ret[inst_id] = json.dumps(body)
             # Move on to the next installation
-            logging.debug(
+            logging.info(
                 "Done sending activations of installation %s" % (inst_id))
         return ret
 
@@ -332,8 +333,8 @@ class NILM(object):
         # Send activations
         try:
             act_result = self._send_activations()
-            logging.debug("Activations report:")
-            logging.debug(act_result)
+            logging.info("Activations report:")
+            logging.info(act_result)
         except Exception as e:
             logging.warning("Sending of activations failed!")
             logging.warning("Exception type: %s" % (str(type(e))))
@@ -358,10 +359,12 @@ class NILM(object):
             "_id": model.detected_appliance.appliance_id,
             "name": model.detected_appliance.name,
             "type": model.detected_appliance.category,
+            "active": model.detected_appliance.signature[0, 0],
+            "reactive": model.detected_appliance.signature[0, 1],
             "status": "true"
         }
         inst_id = model.installation_id
-        logging.debug("Sending notification data:")
+        logging.info("Sending notification data:")
         # TODO: Only when expired?
         self._orch_token = utils.get_jwt('nilm', self._orch_jwt_psk)
         if not self._orch_debug_mode:
@@ -373,7 +376,7 @@ class NILM(object):
                                               (self._orch_token)})
             except Exception as e:
                 logging.warning("Sending of notification failed!")
-                logging.warningn("Exception type: %s" % (str(type(e))))
+                logging.warning("Exception type: %s" % (str(type(e))))
                 logging.warning(e)
             if not resp.ok:
                 logging.error(
@@ -383,10 +386,10 @@ class NILM(object):
                 logging.error("Request body:")
                 logging.error("%s" % (json.dumps(body)))
             else:
-                logging.debug("Appliance detection notification sent: %s" %
-                              (json.dumps(body)))
+                logging.info("Appliance detection notification sent: %s" %
+                             (json.dumps(body)))
         else:
-            logging.debug("Notification: %s", json.dumps(body))
+            logging.info("Notification: %s", json.dumps(body))
 
     def _mqtt(self):
         """
@@ -408,17 +411,18 @@ class NILM(object):
             # Disable immediate clustering after reconnect
             # TODO: Is there a better way?
             # DELETE THIS
-            #for m in self._models:
+            # for m in self._models:
             #    m._last_clustering_ts = datetime.datetime.now()
             while not success:
                 try:
                     broker = self._config['MQTT']['broker']
                     port = int(self._config['MQTT']['port'])
                     logging.info("Trying to Reconnect")
+                    client.reinitialise(clean_session=True)
                     client.connect(broker, port)
                     success = True
                 except Exception as e:
-                    wait = retries * 10
+                    wait = retries * 60
                     logging.info("Error in Retrying to Connect with Broker")
                     logging.warning("Exception type: %s" % (str(type(e))))
                     logging.warning(e)
@@ -455,13 +459,13 @@ class NILM(object):
                 if self._recomputation_active[inst_id]:
                     # If recomputation is active, keep data in a buffer for up
                     # to MAX_REC_BUFFER entries
-                    logging.debug('Recomputation is active, data in buffer')
+                    logging.info('Recomputation is active, data in buffer')
                     if self._recomputation_buffer[inst_id] is None:
                         self._recomputation_buffer[inst_id] = data
                     else:
                         if len(self._recomputation_buffer[inst_id].index) > \
                            self.MAX_REC_BUFFER:
-                            logging.debug('Max buffer size reached, ignoring')
+                            logging.info('Max buffer size reached, ignoring')
                             pass
                         else:
                             self._recomputation_buffer[inst_id].append(data)
@@ -469,7 +473,7 @@ class NILM(object):
                     model = self._models[inst_id]
                     if self._recomputation_buffer[inst_id] is not None:
                         # There's data in the buffer, process these first
-                        logging.debug('Processing buffer data')
+                        logging.info('Processing buffer data')
                         model.update(self._recomputation_buffer[inst_id])
                         self._recomputation_buffer[inst_id] = None
                         # TODO: ?
@@ -495,9 +499,9 @@ class NILM(object):
                     # Persistent storage
                     self._store_model(inst_id)
         # Prepare the models (As it stands, it shouldn't do anything)
-        logging.debug('Loading models from database (MQTT) thread')
+        logging.info('Loading models from database (MQTT) thread')
         for inst_id in self._inst_list:
-            logging.debug('Loading %s' % (inst_id))
+            logging.info('Loading %s' % (inst_id))
             self._load_or_create_model(inst_id)
             # Avoid clustering immediately after model load.
             # TODO: Better way to do this?
@@ -601,7 +605,15 @@ class NILM(object):
             return json.dumps(body_d)
         payload = []
         # Insert background
-        if not model.is_background_overestimated():
+        if model.is_background_overestimated():
+            app_d = {"_id": '000000000000000000000002',
+                     "name": "Other",
+                     "type": "residual",
+                     "active": model.running_avg_power[0],
+                     "reactive": model.running_avg_power[1]}
+            d = {"data": app_d, "timestamp": ts}
+            payload.append(d)
+        else:
             app_d = {"_id": '000000000000000000000001',
                      "name": "Background",
                      "type": "background",
@@ -609,6 +621,7 @@ class NILM(object):
                      "reactive": 0.0}
             d = {"data": app_d, "timestamp": ts}
             payload.append(d)
+
         for i in range(len(model.live)):
             app = model.live[i]
             app_d = {"_id": app.appliance_id,
@@ -744,7 +757,7 @@ class NILM(object):
         if inst_id not in self._model_lock.keys():
             self._model_lock[inst_id] = threading.Lock()
 
-        logging.debug('Recomputing model for %s' % (inst_id))
+        logging.info('Recomputing model for %s' % (inst_id))
         self._recomputation_active[inst_id] = True
         with self._model_lock[inst_id]:
             # Delete model from memory
@@ -772,7 +785,7 @@ class NILM(object):
             url = self._computations_url + '/' + inst_id
 
         # Main recomputation loop.
-        logging.debug('Starting recomputation loop')
+        logging.info('Starting recomputation loop')
         rstep = step
         for ts in range(start_ts, end_ts - warmup_period, rstep):
             # Endpoint expects timestamp in milliseconds since unix epoch
@@ -845,8 +858,8 @@ class NILM(object):
             )
         else:
             # Everything went well, process the past notification responses
-            logging.debug("Notifications for %s received successfully,"
-                          "processing.", inst_id)
+            logging.info("Notifications for %s received successfully,"
+                         "processing.", inst_id)
             with self._model_lock[inst_id]:
                 self._recomputation_appliance_naming(inst_id, r.text)
         with self._model_lock[inst_id]:
@@ -918,7 +931,7 @@ class NILM(object):
         with self._model_lock[inst_id]:
             logging.debug('NILM lock (GET)')
             resp.body = self._prepare_response_body(self._models[inst_id])
-            logging.debug('Response body: %s' % (resp.body))
+            logging.info('Response body (GET): %s' % (resp.body))
         logging.debug('NILM unlock (GET)')
         time.sleep(0.01)
         resp.status = falcon.HTTP_200
@@ -1129,8 +1142,8 @@ class NILM(object):
         created. Expects parameters appliance_id, name and category, all
         strings.
         """
-        logging.debug('Received appliance naming event for installation %s' %
-                      (inst_id))
+        logging.info('Received appliance naming event for installation %s' %
+                     (inst_id))
         if not self._accept_inst(inst_id):
             resp.status = falcon.HTTP_400
             resp.body = "Installation not in list for this NILM instance."
@@ -1148,30 +1161,40 @@ class NILM(object):
         if inst_id not in self._model_lock.keys():
             self._model_lock[inst_id] = threading.Lock()
         with self._model_lock[inst_id]:
+            only_live = False
             model = self._models[inst_id]
-            if appliance_id not in model.appliances:
-                logging.warning("Appliance id %s not found in model")
+            if appliance_id not in model.appliances and \
+               appliance_id not in model.appliances_live:
+                logging.warning(
+                    "Appliance id %s not found in model", appliance_id)
                 self._model_lock[inst_id].release()
                 time.sleep(0.01)
                 resp.status = falcon.HTTP_400
                 resp.body = ("Appliance id %s not found" % (appliance_id))
                 return
-            prev_name = model.appliances[appliance_id].name
-            prev_category = model.appliances[appliance_id].category
-            model.appliances[appliance_id].name = name
-            model.appliances[appliance_id].category = category
-            model.appliances[appliance_id].verified = True
-            # Also update live appliance
-            live_app = next((item for item in model.live if
-                             item.appliance_id == appliance_id), None)
-            if live_app is None:
-                logging.warning(
-                    "Notifications: Appliance id %s not in the"
-                    "list of live appliances" % (appliance_id))
             else:
-                live_app.name = name
-                live_app.category = category
-                live_app.verified = True
+                if appliance_id in model.appliances:
+                    appliances = model.appliances
+                else:
+                    appliances = model.appliances_live
+                    only_live = True
+            prev_name = appliances[appliance_id].name
+            prev_category = appliances[appliance_id].category
+            appliances[appliance_id].name = name
+            appliances[appliance_id].category = category
+            appliances[appliance_id].verified = True
+            # Also update live appliance
+            if not only_live:
+                live_app = next((item for item in model.live if
+                                 item.appliance_id == appliance_id), None)
+                if live_app is None:
+                    logging.warning(
+                        "Naming: Appliance id %s not in the"
+                        "list of live appliances" % (appliance_id))
+                else:
+                    live_app.name = name
+                    live_app.category = category
+                    live_app.verified = True
             logging.info(("Installation: %s. Renamed appliance "
                           "%s from %s with "
                           "category %s to %s with category %s") %

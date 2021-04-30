@@ -122,7 +122,7 @@ class LiveHart(object):
         self._last_visualized_ts = None
         self._online_edge_ts = None
         self._ymatch = None
-        self._ymatch_live = None
+        self._ymatch_live = None  # Not used (TODO?)
         # Installation id (is this necessary?)
         self.installation_id = installation_id
         # List of states and transitions detected so far.
@@ -252,7 +252,7 @@ class LiveHart(object):
         # TODO: Handle N/As and zero voltage.
         # TODO: Unit tests with all the unusual cases
 
-        # Update match buffer
+        # Update ymatch (auxilliary timeseries with only matched edges)
         if self._ymatch is None:
             self._ymatch = pd.DataFrame(np.zeros([self._buffer.shape[0], 2]),
                                         index=self._buffer.index,
@@ -264,7 +264,8 @@ class LiveHart(object):
             self._ymatch = self._ymatch.append(d, sort=True)
             if not self.batch_mode:
                 start_ts = self._ymatch.index[-1] - \
-                    pd.offsets.Second(self.MAX_MATCH_THRESHOLD_DAYS*3600*24 - 1)
+                    pd.offsets.Second(
+                        self.MAX_MATCH_THRESHOLD_DAYS*3600*24 - 1)
                 self._ymatch = self._ymatch.loc[self._ymatch.index >= start_ts]
 
     def _reset(self):
@@ -420,6 +421,16 @@ class LiveHart(object):
                 # true here. TODO: Verify this.
                 # a[m].live = True
                 a[m].start_ts = self.appliances_live[k].start_ts
+                # If live appliance is named, then copy name
+                if self.appliances_live[k].verified:
+                    # If both the live and the clustered appliance is verified,
+                    # then do nothing
+                    # TODO: Introduce a voting mechanism?
+                    if not a[m].verified:
+                        a[m].name = self.appliances_live[k].name
+                        a[m].category = self.appliances_live[k].category
+                        a[m].verified = True
+
                 # In case the appliance is operating, replace with new live.
                 try:
                     idx = self.live.index(self.appliances_live[k])
@@ -619,15 +630,6 @@ class LiveHart(object):
                 mapping = appliance.appliance_mapping(appliances,
                                                       self.appliances)
                 self._sync_appliances(appliances, mapping)
-            logging.debug('Clustering complete. Current list of appliances:')
-            for _, a in self.appliances.items():
-                logging.debug("------------------------\n"
-                              "ID: %s\n"
-                              "Signature: %s\n"
-                              "Name: %s\n"
-                              "Category: %s\n"
-                              % (a.appliance_id, a.signature, a.name,
-                                 a.category))
 
             # Sync live appliances.
             # Option 1: Just copy the clusters.
@@ -638,6 +640,18 @@ class LiveHart(object):
                                                   self.appliances,
                                                   t=2*self.MATCH_THRESHOLD)
             self._sync_appliances_live(mapping)
+
+            # For debugging
+            logging.debug('Clustering complete. Current list of appliances:')
+            for _, a in self.appliances.items():
+                logging.debug("------------------------\n"
+                              "ID: %s\n"
+                              "Signature: %s\n"
+                              "Name: %s\n"
+                              "Category: %s\n"
+                              % (a.appliance_id, a.signature, a.name,
+                                 a.category))
+
             # Set timestamp
             self._last_clustering_ts = clustering_start_ts
 
@@ -729,9 +743,11 @@ class LiveHart(object):
                     continue
                 # Do they match? (use negative of edge for e2, since it is the
                 # negative part)
-                e1 = e.iloc[i][['active', 'reactive']].values.astype(np.float64)
+                e1 = e.iloc[i][['active', 'reactive']
+                               ].values.astype(np.float64)
                 e2 = \
-                    -e.iloc[j][['active', 'reactive']].values.astype(np.float64)
+                    -e.iloc[j][['active', 'reactive']
+                               ].values.astype(np.float64)
                 try:
                     match, d = utils.match_power(e1, e2, active_only=True,
                                                  t=self.MATCH_THRESHOLD)
@@ -778,7 +794,8 @@ class LiveHart(object):
         # It is possible in cases where there are issues with communication with
         # NILM that start/end exceed the size of _ymatch. In that case just
         # return false.
-        if start > end or start > self._ymatch['active'].shape[0]:
+        # Note that start > end (because these are time differences!)
+        if start < end or start > self._ymatch['active'].shape[0]:
             return False
         self._ymatch['active'][-start:-end] += active
         # Hardcoded parameters. Can be more strict.
@@ -993,7 +1010,7 @@ class LiveHart(object):
             if self._last_visualized_ts is not None:
                 td = (self.last_processed_ts - self._last_visualized_ts)
                 # Days should always be zero, but just in case
-                step = td.days * 3600 * 24 + td.seconds + 1
+                step = td.days * 3600 * 24 + td.seconds
             else:
                 td = (self.last_processed_ts - self._data.index[0])
                 step = td.days * 3600 * 24 + td.seconds + 1
@@ -1005,7 +1022,7 @@ class LiveHart(object):
             if self._last_visualized_ts is not None:
                 if (self._online_edge_ts > self._last_visualized_ts):
                     td = (self._online_edge_ts - self._last_visualized_ts)
-                    step1 = td.days * 3600 * 24 + td.seconds + 1
+                    step1 = td.days * 3600 * 24 + td.seconds
                 else:
                     td = (self._last_visualized_ts - self._online_edge_ts)
                     step1 = td.days * 3600 * 24 + td.seconds + 1
@@ -1111,7 +1128,7 @@ class LiveHart(object):
                 # Return if no new steady states exist (how?)
                 return
         # Current background estimate seems to be inaccurate.
-        if self.background_active > 0.8 * self.running_avg_power[0]:
+        if self.background_active > 1.2 * self.running_avg_power[0]:
             self._count_bg_overestimation += 1
             if self._count_bg_overestimation > self.OVERESTIMATION_SECONDS:
                 logging.warning(
@@ -1245,7 +1262,8 @@ class LiveHart(object):
             if self._last_clustering_ts is not None:
                 td = self.last_processed_ts - self._last_clustering_ts
             else:
-                td = self.last_processed_ts - self._start_ts
+                td = self.last_processed_ts - self._start_ts + \
+                    datetime.timedelta(seconds=1)
 
         if td.total_seconds() / 3600.0 >= self.CLUSTER_STEP_HOURS:
             self.force_clustering(method=self.CLUSTERING_METHOD,
