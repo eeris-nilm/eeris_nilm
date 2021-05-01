@@ -128,28 +128,43 @@ class Demo(object):
         while t < end:
             t += datetime.timedelta(seconds=self.step)
             tnext = t+datetime.timedelta(seconds=self.step)
-            idx = (t - self.start_ts).seconds
             data = self.power.loc[t:tnext]
-            yield idx, data
+            if data.shape[0] == 0:
+                continue
+            yield t, data
 
     def __call__(self, data):
         t, y = data
-        self.model.update(y)
+        try:
+            self.model.update(y)
+        except ValueError as err:
+            logging.error('ERROR: %s' % (err))
+            return None
         # Update lines
-        data = self.model._buffer
-        self.xdata = (data.index.hour * 3200 + data.index.minute *
-                      60 + data.index.second).values.tolist()
-        self.ydata = (data['active'].values.tolist())
+        bufidx = self.model._buffer.index
+        tmpdata = self.model._buffer.loc[bufidx > t]
+        self.xdata.extend((tmpdata.index.hour * 3200 + tmpdata.index.minute * 60
+                           + tmpdata.index.second).values.tolist())
+        self.ydata.extend(tmpdata['active'].values.tolist())
         lim = min(len(self.xdata), self.time_window)
         self.line_active.set_data(self.xdata[-lim:], self.ydata[-lim:])
         ydisp = self.model._yest[-lim:].tolist()
-        self.line_est.set_data(self.xdata[-lim:], ydisp)
-        ymatchdisp = self.model._ymatch['active'].values[-lim:].tolist()
-        self.line_match.set_data(self.xdata[-lim:], ymatchdisp)
+        lim1 = (bufidx[-1] - self.model.last_processed_ts).seconds
+        if lim1 > 0:
+            self.line_est.set_data(self.xdata[-lim:-lim1], ydisp)
+            self.line_est.set_data(self.xdata[-lim:-lim1], ydisp)
+            ymatchdisp = self.model._ymatch['active'].values[-lim:-lim1].tolist()
+            self.line_match.set_data(self.xdata[-lim:-lim1], ymatchdisp)
+        else:
+            self.line_est.set_data(self.xdata[-lim:], ydisp)
+            self.line_est.set_data(self.xdata[-lim:], ydisp)
+            ymatchdisp = self.model._ymatch['active'].values[-lim:].tolist()
+            self.line_match.set_data(self.xdata[-lim:], ymatchdisp)
         # Update axis limits
+        tidx = t.hour * 3200 + t.minute * 60 + t.second
         xmin, xmax = self.ax.get_xlim()
-        xmin = max(0, t + self.step - self.time_window + 1)
-        xmax = max(self.time_window, t + self.step)
+        xmin = max(0, tidx + self.step - self.time_window + 1)
+        xmax = max(self.time_window, tidx + self.step)
         ymin = min(self.ydata[-self.time_window:] + [0])  # List concatenation
         ymax = max(self.ydata[-self.time_window:] + [0])  # List concatenation
         self.ax.set_xlim(xmin - 100, xmax + 100)
@@ -203,7 +218,7 @@ step = 5
 # Whether to display on the screen or save to a video file. Change this to True
 # to save a file
 # save = True
-save = True
+save = False
 # In case save is 'True' specify the output directory (which must exist)
 video_out = 'demo_videos/'
 inst_id = None
@@ -235,8 +250,8 @@ elif dataset == 'cenote':
 elif dataset == 'eeris':
     p = 'tests/data/eeris/5e05d5c83e442d4f78db036f_'
     date_start = '2020-12-01T00:00'
-    date_end = '2020-12-13T23:59'
-    # date_end = '2020-12-01T23:59'
+    # date_end = '2020-12-13T23:59'
+    date_end = '2020-12-01T23:59'
     inst_id = '5e05d5c83e442d4f78db036f'
     model_path_r = 'tests/data/model_eeris.dill'
     model_path_w = 'tests/data/model_eeris.dill'
