@@ -50,7 +50,7 @@ def create_app(conf_file):
     else:
         loglevel = eval('logging.' + config['eeRIS']['loglevel'])
 
-    logging.setLevel(loglevel)
+    logging.basicConfig(level=loglevel)
 
     # DB connection
     logging.info("Connecting to database")
