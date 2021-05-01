@@ -19,7 +19,7 @@ import sys
 import os
 import dill
 import datetime
-# import logging
+import logging
 import pandas as pd
 
 import matplotlib.pyplot as plt
@@ -32,6 +32,8 @@ from eeris_nilm.datasets import eco
 from eeris_nilm.datasets import cenote
 from eeris_nilm.datasets import eeris
 from eeris_nilm.algorithms import livehart
+
+logging.basicConfig(level=logging.DEBUG)
 
 
 class Demo(object):
@@ -217,8 +219,8 @@ else:
 step = 5
 # Whether to display on the screen or save to a video file. Change this to True
 # to save a file
-# save = True
-save = False
+save = True
+# save = False
 # In case save is 'True' specify the output directory (which must exist)
 video_out = 'demo_videos/'
 inst_id = None
@@ -250,8 +252,8 @@ elif dataset == 'cenote':
 elif dataset == 'eeris':
     p = 'tests/data/eeris/5e05d5c83e442d4f78db036f_'
     date_start = '2020-12-01T00:00'
-    # date_end = '2020-12-13T23:59'
-    date_end = '2020-12-01T23:59'
+    #date_end = '2020-12-13T23:59'
+    date_end = '2020-12-03T23:59'
     inst_id = '5e05d5c83e442d4f78db036f'
     model_path_r = 'tests/data/model_eeris.dill'
     model_path_w = 'tests/data/model_eeris.dill'

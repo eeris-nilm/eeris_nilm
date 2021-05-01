@@ -858,6 +858,8 @@ class NILM(object):
             )
         else:
             # Everything went well, process the past notification responses
+            # TODO: Should we update this to be based on matched signatures? We
+            # transition from notification-based model to editing
             logging.info("Notifications for %s received successfully,"
                          "processing.", inst_id)
             with self._model_lock[inst_id]:

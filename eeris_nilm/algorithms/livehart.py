@@ -430,6 +430,13 @@ class LiveHart(object):
                         a[m].name = self.appliances_live[k].name
                         a[m].category = self.appliances_live[k].category
                         a[m].verified = True
+                    else:
+                        logging.INFO('Appliance %d already has a name (%s)'
+                                     'and category (%s), not updating with'
+                                     'new name (%s) and category (%s)' %
+                                     (m, a[m].name, a[m].category,
+                                      self.appliances_live[k].name,
+                                      self.appliances_live[k].category))
 
                 # In case the appliance is operating, replace with new live.
                 try:
@@ -564,13 +571,13 @@ class LiveHart(object):
             for l in u_labels:
                 centers[l] = np.mean(matches[d.labels_ == l, :], axis=0)
         elif method == "mean_shift":
-            # NOTE: Normalize matches in the 0-1 range, so that difference is
+            # TODO: Normalize matches in the 0-1 range, so that difference is
             # percentage! This will perhaps allow better matching behavior.
             # Degrade the matching resolution a bit.
             bandwidth = 2 * self.MATCH_THRESHOLD
             centers, labels = sklearn.cluster.mean_shift(matches,
                                                          bandwidth=bandwidth,
-                                                         cluster_all=True)
+                                                         cluster_all=False)
             u_labels = np.unique(labels[labels >= 0])
         else:
             raise ValueError(("Unrecognized clustering method %s. Possible "
