@@ -64,6 +64,8 @@ class Demo(object):
 
         self.xdata, self.ydata = [], []
         self.ymatch = None
+        self.start_day = None
+        self.vis = None
 
         # Prepare model.
         self.model_path_r = model_path_r
@@ -137,6 +139,14 @@ class Demo(object):
 
     def __call__(self, data):
         t, y = data
+        if self.model._last_visualized_ts is None or self.vis is None:
+            self.vis = t
+        elif self.vis < self.model._last_visualized_ts:
+            # This is to avoid cases with repeated past measurements. Should
+            # perhaps be handled in livehart.py
+            self.vis = self.model._last_visualized_ts
+        if self.start_day is None:
+            self.start_day = t.day
         try:
             self.model.update(y)
         except ValueError as err:
@@ -144,21 +154,20 @@ class Demo(object):
             return None
         # Update lines
         bufidx = self.model._buffer.index
-        tmpdata = self.model._buffer.loc[bufidx > t]
-        self.xdata.extend((tmpdata.index.hour * 3200 + tmpdata.index.minute * 60
+        tmpdata = self.model._buffer.loc[bufidx > self.vis]
+        day = tmpdata.index.day - self.start_day
+        self.xdata.extend((day * 3200 * 24 + tmpdata.index.hour * 3200 + tmpdata.index.minute * 60
                            + tmpdata.index.second).values.tolist())
         self.ydata.extend(tmpdata['active'].values.tolist())
         lim = min(len(self.xdata), self.time_window)
         self.line_active.set_data(self.xdata[-lim:], self.ydata[-lim:])
-        ydisp = self.model._yest[-lim:].tolist()
-        lim1 = (bufidx[-1] - self.model.last_processed_ts).seconds
+        lim1 = (bufidx[-1] - self.model._last_visualized_ts).seconds
+        ydisp = self.model._yest[-(lim-lim1):].tolist()
         if lim1 > 0:
-            self.line_est.set_data(self.xdata[-lim:-lim1], ydisp)
             self.line_est.set_data(self.xdata[-lim:-lim1], ydisp)
             ymatchdisp = self.model._ymatch['active'].values[-lim:-lim1].tolist()
             self.line_match.set_data(self.xdata[-lim:-lim1], ymatchdisp)
         else:
-            self.line_est.set_data(self.xdata[-lim:], ydisp)
             self.line_est.set_data(self.xdata[-lim:], ydisp)
             ymatchdisp = self.model._ymatch['active'].values[-lim:].tolist()
             self.line_match.set_data(self.xdata[-lim:], ymatchdisp)
@@ -219,8 +228,8 @@ else:
 step = 5
 # Whether to display on the screen or save to a video file. Change this to True
 # to save a file
-save = True
-# save = False
+# save = True
+save = False
 # In case save is 'True' specify the output directory (which must exist)
 video_out = 'demo_videos/'
 inst_id = None
@@ -252,8 +261,8 @@ elif dataset == 'cenote':
 elif dataset == 'eeris':
     p = 'tests/data/eeris/5e05d5c83e442d4f78db036f_'
     date_start = '2020-12-01T00:00'
-    #date_end = '2020-12-13T23:59'
-    date_end = '2020-12-03T23:59'
+    date_end = '2020-12-13T23:59'
+    # date_end = '2020-12-04T23:59'
     inst_id = '5e05d5c83e442d4f78db036f'
     model_path_r = 'tests/data/model_eeris.dill'
     model_path_w = 'tests/data/model_eeris.dill'
