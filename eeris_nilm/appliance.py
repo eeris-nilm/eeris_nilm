@@ -218,8 +218,7 @@ def match_appliances_power(a_from, a_to, t=35.0, copy_activations=True):
 def _activations_overlap_pct(a1, a2, tol=5, n_limit=500):
     """
     Given two appliances with their activations, identify the percentage of
-    matched activations. For a pair of activations to match, they need to
-    have at most
+    matched activations.
 
     Parameters
     ----------
