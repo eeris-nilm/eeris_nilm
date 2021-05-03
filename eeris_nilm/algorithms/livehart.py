@@ -431,7 +431,7 @@ class LiveHart(object):
                         a[m].category = self.appliances_live[k].category
                         a[m].verified = True
                     else:
-                        logging.INFO('Appliance %d already has a name (%s)'
+                        logging.info('Appliance %s already has a name (%s)'
                                      'and category (%s), not updating with'
                                      'new name (%s) and category (%s)' %
                                      (m, a[m].name, a[m].category,
