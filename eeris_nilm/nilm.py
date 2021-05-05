@@ -585,15 +585,16 @@ class NILM(object):
         if self._recomputation_active[inst_id]:
             payload = []
             app_d = {"_id": '000000000000000000000003',
-                     "name": "Recomputation",
+                     "name": "Recomputation in progress",
                      "type": "recomputation",
-                     "active": 100.0,
-                     "reactive": 100.0}
+                     "active": 0.0,
+                     "reactive": 0.0}
             ts = dt.datetime.now().timestamp() * 1000
             d = {"data": app_d, "timestamp": ts}
             payload.append(d)
-            body = {"installation_id": str(inst_id),
-                    "payload": payload}
+            body_d = {"installation_id": str(inst_id),
+                      "payload": payload}
+            body = json.dumps(body_d)
             return body
         # ts = dt.datetime.now().timestamp() * 1000
         if model.last_processed_ts is not None:
@@ -928,6 +929,7 @@ class NILM(object):
             resp.body = "Installation not in list for this NILM instance."
             logging.info(("Rejected request for installation %s") % (inst_id))
             return
+
         if inst_id not in self._model_lock.keys():
             self._model_lock[inst_id] = threading.Lock()
         with self._model_lock[inst_id]:

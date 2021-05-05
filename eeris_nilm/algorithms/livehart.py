@@ -431,12 +431,12 @@ class LiveHart(object):
                         a[m].category = self.appliances_live[k].category
                         a[m].verified = True
                     else:
-                        logging.info('Appliance %s already has a name (%s)'
-                                     'and category (%s), not updating with'
-                                     'new name (%s) and category (%s)' %
-                                     (m, a[m].name, a[m].category,
-                                      self.appliances_live[k].name,
-                                      self.appliances_live[k].category))
+                        logging.debug('Appliance %s already has a name (%s)'
+                                      ' and category (%s), not updating with'
+                                      ' name (%s) and category (%s)' %
+                                      (m, a[m].name, a[m].category,
+                                       self.appliances_live[k].name,
+                                       self.appliances_live[k].category))
 
                 # In case the appliance is operating, replace with new live.
                 try:
@@ -446,11 +446,13 @@ class LiveHart(object):
                     continue
             else:
                 # Non-mapped appliances remain the same, so self.live shouldn't
-                # be affected.
-                a[k] = self.appliances_live[k]
+                # be affected.  a[k] = self.appliances_live[k]
+                #
+                # DEBUG: Test to see what happens if we throw away all live appliances after
+                # each clustering step.
+                self._appliance_display_id = 0
         self.appliances_live = a
 
-    # TODO: delete this?
     def _sync_appliances_live_copy(self):
         """
         The live appliances are just a copy of the clustered appliances.
@@ -574,7 +576,7 @@ class LiveHart(object):
             # TODO: Normalize matches in the 0-1 range, so that difference is
             # percentage! This will perhaps allow better matching behavior.
             # Degrade the matching resolution a bit.
-            bandwidth = 2 * self.MATCH_THRESHOLD
+            bandwidth = self.MATCH_THRESHOLD
             centers, labels = sklearn.cluster.mean_shift(matches,
                                                          bandwidth=bandwidth,
                                                          cluster_all=False)
@@ -642,10 +644,11 @@ class LiveHart(object):
             # Option 1: Just copy the clusters.
             # self._sync_appliances_live_copy()
 
-            # Option 2: Map and sync.
+            # Option 2: Map and sync. Only use power for live mapping?
             mapping = appliance.appliance_mapping(self.appliances_live,
                                                   self.appliances,
-                                                  t=2*self.MATCH_THRESHOLD)
+                                                  t=2*self.MATCH_THRESHOLD,
+                                                  only_power=True)
             self._sync_appliances_live(mapping)
 
             # For debugging
