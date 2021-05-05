@@ -489,7 +489,7 @@ class NILM(object):
             time.sleep(0.01)
             # Notify orchestrator for appliance detection
             if not self._recomputation_active[inst_id]:
-                self._handle_notifications(model)
+                self._handle_notifications(self._models[inst_id])
             # It is possible that _store_model cannot store, and keeps this to
             # True afterwards
             if self._put_count[inst_id] % self.STORE_PERIOD == 0:
