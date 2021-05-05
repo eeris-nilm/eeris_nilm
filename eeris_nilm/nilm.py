@@ -476,6 +476,7 @@ class NILM(object):
                         logging.info('Processing buffer data')
                         model.update(self._recomputation_buffer[inst_id])
                         self._recomputation_buffer[inst_id] = None
+                        model._reset()
                         # TODO: ?
                         # self._put_count[inst_id] = 1
                     else:

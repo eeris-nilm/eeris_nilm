@@ -281,11 +281,13 @@ class LiveHart(object):
         self.running_avg_power = np.array([0.0, 0.0])
         self._online_edge_detected = False
         self._online_edge = np.array([0.0, 0.0])
-        for a in self.live:
-            start_ts = a.start_ts
-            end_ts = self.last_processed_ts
-            active = a.signature[0][0]
-            a.append_activation(start_ts, end_ts, active)
+        # TODO Should we have this?
+        # for a in self.live:
+        #     start_ts = a.start_ts
+        #     end_ts = self.last_processed_ts
+        #     active = a.signature[0][0]
+        #     a.append_activation(start_ts, end_ts, active)
+        self.appliances_live = self.appliances.copy()
         self.live = []
 
     def _detect_edges_hart(self):
