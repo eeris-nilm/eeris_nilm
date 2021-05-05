@@ -431,12 +431,12 @@ class LiveHart(object):
                         a[m].category = self.appliances_live[k].category
                         a[m].verified = True
                     else:
-                        logging.info('Appliance %s already has a name (%s)'
-                                     'and category (%s), not updating with'
-                                     'new name (%s) and category (%s)' %
-                                     (m, a[m].name, a[m].category,
-                                      self.appliances_live[k].name,
-                                      self.appliances_live[k].category))
+                        logging.debug('Appliance %s already has a name (%s)'
+                                      ' and category (%s), not updating with'
+                                      ' name (%s) and category (%s)' %
+                                      (m, a[m].name, a[m].category,
+                                       self.appliances_live[k].name,
+                                       self.appliances_live[k].category))
 
                 # In case the appliance is operating, replace with new live.
                 try:
