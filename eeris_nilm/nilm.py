@@ -915,10 +915,12 @@ class NILM(object):
         min_diff = pd.Timedelta(value=5, units='seconds')
         appliance = None
         for n in notif:
+            if type(n) is not dict:
+                continue
             ts = pd.to_datetime(n['createdat'], unit='ms')
             for _, a in model.appliances.items():
                 idx = a.activations['start'].sub(ts).abs().idxmin()
-                nearest = a.at[idx, 'start']
+                nearest = a.activations.at[idx, 'start']
                 if ts - nearest < min_diff:
                     appliance = a
         if appliance is not None:
