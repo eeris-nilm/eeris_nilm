@@ -821,10 +821,10 @@ class NILM(object):
                 if self._store_flag:
                     # Persistent storage
                     self._store_model(inst_id)
-            logging.debug(
-                "Finished first stage of recomputation for %s" % (inst_id))
             time.sleep(0.1)
 
+        logging.debug(
+            "Finished first stage of recomputation for %s" % (inst_id))
         st = (end_ts - warmup_period + 1) * 1000
         et = end_ts * 1000
         params = {
@@ -839,6 +839,7 @@ class NILM(object):
             data = None
         else:
             data = utils.get_data_from_cenote_response(r)
+        if data is not None:
             rstep = 3  # Hardcoded
             for i in range(0, data.shape[0], rstep):
                 d = data.iloc[i:i+rstep, :]
