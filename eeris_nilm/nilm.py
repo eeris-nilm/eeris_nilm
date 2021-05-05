@@ -785,88 +785,92 @@ class NILM(object):
             model = self._models[inst_id]
             url = self._computations_url + '/' + inst_id
 
-        # Main recomputation loop.
-        logging.info('Starting recomputation loop')
-        rstep = step
-        for ts in range(start_ts, end_ts - warmup_period, rstep):
-            # Endpoint expects timestamp in milliseconds since unix epoch
-            st = ts * 1000
-            if ts + rstep < end_ts:
-                et = (ts + rstep) * 1000
-            else:
-                et = end_ts * 1000
+            # Main recomputation loop.
+            logging.info('Starting recomputation loop')
+            rstep = step
+            for ts in range(start_ts, end_ts - warmup_period, rstep):
+                # Endpoint expects timestamp in milliseconds since unix epoch
+                st = ts * 1000
+                if ts + rstep < end_ts:
+                    et = (ts + rstep) * 1000
+                else:
+                    et = end_ts * 1000
 
-            params = {
-                "start": st,
-                "end": et
-            }
-            self._orch_token = utils.get_jwt('nilm', self._orch_jwt_psk)
-            r = utils.request_with_retry(url, data=json.dumps(params),
-                                         request='get',
-                                         token=self._orch_token)
-            if r.ok:
-                data = utils.get_data_from_cenote_response(r)
-            else:
-                logging.warning("Request failed: (%s, %s)" % (r.status_code,
-                                                              r.text))
-                data = None
-            if data is None:
-                continue
-            with self._model_lock[inst_id]:
-                model.update(data, start_thread=False)
-                self._put_count[inst_id] += 1
-                if (self._put_count[inst_id] // step) % \
-                   self.STORE_PERIOD == 0:
-                    self._store_flag = True
-                if self._store_flag:
-                    # Persistent storage
-                    self._store_model(inst_id)
-
-        st = (end_ts - warmup_period + 1) * 1000
-        et = end_ts * 1000
-        params = {
-            "start": st,
-            "end": et
-        }
-        self._orch_token = utils.get_jwt('nilm', self._orch_jwt_psk)
-        r = utils.request_with_retry(url, params, request='get',
-                                     token=self._orch_token)
-        if not r.ok:
-            data = None
-        else:
-            data = utils.get_data_from_cenote_response(r)
-            rstep = 3  # Hardcoded
-            for i in range(0, data.shape[0], rstep):
-                d = data.iloc[i:i+rstep, :]
+                params = {
+                    "start": st,
+                    "end": et
+                }
+                self._orch_token = utils.get_jwt('nilm', self._orch_jwt_psk)
+                r = utils.request_with_retry(url, data=json.dumps(params),
+                                             request='get',
+                                             token=self._orch_token)
+                if r.ok:
+                    data = utils.get_data_from_cenote_response(r)
+                else:
+                    logging.warning("Request failed: (%s, %s)" % (r.status_code,
+                                                                  r.text))
+                    data = None
+                if data is None:
+                    continue
                 with self._model_lock[inst_id]:
-                    model.update(d, start_thread=False)
+                    model.update(data, start_thread=False)
                     self._put_count[inst_id] += 1
-                    if (self._put_count[inst_id] // rstep) % \
+                    if (self._put_count[inst_id] // step) % \
                        self.STORE_PERIOD == 0:
                         self._store_flag = True
                     if self._store_flag:
                         # Persistent storage
                         self._store_model(inst_id)
-        # Name the appliances based on past user resposes
-        url = self._notifications_url + '/' + inst_id + '/' + \
-            self._notifications_batch_suffix
-        self._orch_token = utils.get_jwt('nilm', self._orch_jwt_psk)
-        r = utils.request_with_retry(url, token=self._orch_token)
-        if not r.ok:
-            logging.error(
-                "Error in receiving data for %s failed: (%d, %s)"
-                % (inst_id, r.status_code, r.text)
-            )
-        else:
-            # Everything went well, process the past notification responses
-            # TODO: Should we update this to be based on matched signatures? We
-            # transition from notification-based model to editing
-            logging.info("Notifications for %s received successfully,"
-                         "processing.", inst_id)
-            with self._model_lock[inst_id]:
+
+            st = (end_ts - warmup_period + 1) * 1000
+            et = end_ts * 1000
+            params = {
+                "start": st,
+                "end": et
+            }
+            self._orch_token = utils.get_jwt('nilm', self._orch_jwt_psk)
+            r = utils.request_with_retry(url, params, request='get',
+                                         token=self._orch_token)
+            if not r.ok:
+                data = None
+            else:
+                data = utils.get_data_from_cenote_response(r)
+                rstep = 3  # Hardcoded
+                for i in range(0, data.shape[0], rstep):
+                    d = data.iloc[i:i+rstep, :]
+                    with self._model_lock[inst_id]:
+                        model.update(d, start_thread=False)
+                        self._put_count[inst_id] += 1
+                        if (self._put_count[inst_id] // rstep) % \
+                           self.STORE_PERIOD == 0:
+                            self._store_flag = True
+                        if self._store_flag:
+                            # Persistent storage
+                            self._store_model(inst_id)
+            # Name the appliances based on past user resposes
+            url = self._notifications_url + '/' + inst_id + '/' + \
+                self._notifications_batch_suffix
+            self._orch_token = utils.get_jwt('nilm', self._orch_jwt_psk)
+            r = utils.request_with_retry(url,
+                                         request='get',
+                                         token=self._orch_token)
+            if not r.ok:
+                logging.error(
+                    "Error in receiving data for %s failed: (%d, %s)"
+                    % (inst_id, r.status_code, r.text)
+                )
+            else:
+                # Everything went well, process the past notification responses
+                # TODO: Should we update this to be based on matched signatures? We
+                # transition from notification-based model to editing
+                logging.info("Notifications for %s received successfully,"
+                             "processing.", inst_id)
+                # with self._model_lock[inst_id]:
                 self._recomputation_appliance_naming(inst_id, r.text)
-        with self._model_lock[inst_id]:
+            # with self._model_lock[inst_id]:
             self._recomputation_active[inst_id] = False
+        time.sleep(0.1)
+        logging.debug("Finished recomputation for %s" % (inst_id))
 
     def _recomputation_appliance_naming(self, inst_id, naming):
         """
@@ -1105,9 +1109,11 @@ class NILM(object):
         end_ts = int(req.params['end'])
         step = int(req.params['step'])
         name = "recomputation_%s" % (inst_id)
+        warmup = 0
         self._recomputation_thread = threading.Thread(
             target=self._recompute_model, name=name,
-            args=(inst_id, start_ts, end_ts, step)
+            args=(inst_id, start_ts, end_ts, step),
+            kwargs={'warmup_period': warmup}
         )
         self._recomputation_thread.start()
         now = datetime.datetime.now()
