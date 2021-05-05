@@ -727,7 +727,7 @@ class NILM(object):
         # logging.debug('Stored model for %s' % (inst_id))
 
     def _recompute_model(self, inst_id, start_ts, end_ts, step=6 * 3600,
-                         warmup_period=2*3600):
+                         warmup_period=2*3600, use_notifications=False):
         """
         Recompute a model from data provided by a service. Variations of this
         routine can be created for different data sources.
@@ -750,7 +750,7 @@ class NILM(object):
         How many seconds to operate in non-batch mode with 3-second data frames,
         in order to prepare for the appropriate live operation.
         """
-        # TODO: Take into account naming events in the model
+        # TODO: Use editing events to determine appliance naming
         if self._computations_url is None:
             logging.warning(("No URL has been provided for past data.",
                              "Model re-computation is not supported."))
@@ -853,26 +853,27 @@ class NILM(object):
                         # Persistent storage
                         self._store_model(inst_id)
                 time.sleep(0.01)
-        # Name the appliances based on past user resposes
-        url = self._notifications_url + inst_id + '/' + \
-            self._notifications_batch_suffix
-        self._orch_token = utils.get_jwt('nilm', self._orch_jwt_psk)
-        r = utils.request_with_retry(url,
-                                     request='get',
-                                     token=self._orch_token)
-        if not r.ok:
-            logging.warning(
-                "Error in receiving data for %s failed: (%d, %s)"
-                % (inst_id, r.status_code, r.text)
-            )
-        else:
-            # Everything went well, process the past notification responses
-            # TODO: Should we update this to be based on matched signatures? We
-            # transition from notification-based model to editing
-            logging.info("Notifications for %s received successfully,"
-                         "processing.", inst_id)
-            with self._model_lock[inst_id]:
-                self._recomputation_appliance_naming(inst_id, r.text)
+        if use_notifications:
+            # Name the appliances based on past user resposes
+            url = self._notifications_url + inst_id + '/' + \
+                self._notifications_batch_suffix
+            self._orch_token = utils.get_jwt('nilm', self._orch_jwt_psk)
+            r = utils.request_with_retry(url,
+                                         request='get',
+                                         token=self._orch_token)
+            if not r.ok:
+                logging.warning(
+                    "Error in receiving data for %s failed: (%d, %s)"
+                    % (inst_id, r.status_code, r.text)
+                )
+            else:
+                # Everything went well, process the past notification responses
+                # TODO: Should we update this to be based on matched signatures? We
+                # transition from notification-based model to editing
+                logging.info("Notifications for %s received successfully,"
+                             "processing.", inst_id)
+                with self._model_lock[inst_id]:
+                    self._recomputation_appliance_naming(inst_id, r.text)
         with self._model_lock[inst_id]:
             logging.debug("Finishing recomputation for %s" % (inst_id))
             self._models[inst_id]._reset()
@@ -923,15 +924,16 @@ class NILM(object):
                 nearest = a.activations.at[idx, 'start']
                 if ts - nearest < min_diff:
                     appliance = a
-        if appliance is not None:
-            appliance.category = notif['selecteddevice']
-            # TODO: Naming should be provided externally
-            # Handle multiple appliances of same type
-            count = 0
-            for _, a in model.appliances.items():
-                if a.category == appliance.category:
-                    count += 1
-            appliance.name = '%s %d' % (notif['selecteddevice'], count)
+                    break
+            if appliance is not None:
+                appliance.category = notif['selecteddevice']
+                # TODO: Naming should be provided externally
+                # Handle multiple appliances of same type
+                count = 0
+                for _, a in model.appliances.items():
+                    if a.category == appliance.category:
+                        count += 1
+                appliance.name = '%s %d' % (notif['selecteddevice'], count)
 
     def on_get(self, req, resp, inst_id):
         """
