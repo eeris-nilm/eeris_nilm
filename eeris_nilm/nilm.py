@@ -857,7 +857,7 @@ class NILM(object):
                                      request='get',
                                      token=self._orch_token)
         if not r.ok:
-            logging.error(
+            logging.warning(
                 "Error in receiving data for %s failed: (%d, %s)"
                 % (inst_id, r.status_code, r.text)
             )
@@ -870,6 +870,7 @@ class NILM(object):
             with self._model_lock[inst_id]:
                 self._recomputation_appliance_naming(inst_id, r.text)
         with self._model_lock[inst_id]:
+            logging.debug("Setting recomputation ase for %s" % (inst_id))
             self._recomputation_active[inst_id] = False
         time.sleep(0.1)
         logging.debug("Finished recomputation for %s" % (inst_id))
