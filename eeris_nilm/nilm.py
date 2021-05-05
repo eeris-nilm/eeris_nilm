@@ -850,7 +850,7 @@ class NILM(object):
                         self._store_model(inst_id)
                 time.sleep(0.01)
         # Name the appliances based on past user resposes
-        url = self._notifications_url + '/' + inst_id + '/' + \
+        url = self._notifications_url + inst_id + '/' + \
             self._notifications_batch_suffix
         self._orch_token = utils.get_jwt('nilm', self._orch_jwt_psk)
         r = utils.request_with_retry(url,
