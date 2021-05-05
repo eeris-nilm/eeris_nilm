@@ -821,6 +821,8 @@ class NILM(object):
                 if self._store_flag:
                     # Persistent storage
                     self._store_model(inst_id)
+            logging.debug(
+                "Finished first stage of recomputation for %s" % (inst_id))
             time.sleep(0.1)
 
         st = (end_ts - warmup_period + 1) * 1000
@@ -830,7 +832,8 @@ class NILM(object):
             "end": et
         }
         self._orch_token = utils.get_jwt('nilm', self._orch_jwt_psk)
-        r = utils.request_with_retry(url, params, request='get',
+        r = utils.request_with_retry(url, data=json.dumps(params),
+                                     request='get',
                                      token=self._orch_token)
         if not r.ok:
             data = None
@@ -911,7 +914,7 @@ class NILM(object):
         min_diff = pd.Timedelta(value=5, units='seconds')
         appliance = None
         for n in notif:
-            ts = pd.to_datetime(n['created_at'], unit='ms')
+            ts = pd.to_datetime(n['createdat'], unit='ms')
             for a in model.appliances:
                 idx = a.activations['start'].sub(ts).abs().idxmin()
                 nearest = a.at[idx, 'start']
