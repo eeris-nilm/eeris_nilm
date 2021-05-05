@@ -916,7 +916,7 @@ class NILM(object):
         appliance = None
         for n in notif:
             ts = pd.to_datetime(n['createdat'], unit='ms')
-            for a in model.appliances:
+            for _, a in model.appliances.items():
                 idx = a.activations['start'].sub(ts).abs().idxmin()
                 nearest = a.at[idx, 'start']
                 if ts - nearest < min_diff:
@@ -926,7 +926,7 @@ class NILM(object):
             # TODO: Naming should be provided externally
             # Handle multiple appliances of same type
             count = 0
-            for a in model.appliances:
+            for _, a in model.appliances.items():
                 if a.category == appliance.category:
                     count += 1
             appliance.name = '%s %d' % (notif['selecteddevice'], count)
