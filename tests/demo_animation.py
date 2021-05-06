@@ -226,6 +226,9 @@ else:
 
 # The real-time NILM loop runs every 'step' measurements
 step = 5
+
+# DEBUG
+step = 2*3600
 # Whether to display on the screen or save to a video file. Change this to True
 # to save a file
 # save = True
@@ -261,7 +264,7 @@ elif dataset == 'cenote':
 elif dataset == 'eeris':
     p = 'tests/data/eeris/5e05d5c83e442d4f78db036f_'
     date_start = '2020-12-01T00:00'
-    date_end = '2020-12-13T23:59'
+    date_end = '2020-12-02T23:59'
     # date_end = '2020-12-04T23:59'
     inst_id = '5e05d5c83e442d4f78db036f'
     model_path_r = 'tests/data/model_eeris.dill'

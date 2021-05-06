@@ -476,6 +476,7 @@ class NILM(object):
                         logging.info('Processing buffer data')
                         model.update(self._recomputation_buffer[inst_id])
                         self._recomputation_buffer[inst_id] = None
+                        model._reset()
                         # TODO: ?
                         # self._put_count[inst_id] = 1
                     else:
@@ -489,7 +490,7 @@ class NILM(object):
             time.sleep(0.01)
             # Notify orchestrator for appliance detection
             if not self._recomputation_active[inst_id]:
-                self._handle_notifications(model)
+                self._handle_notifications(self._models[inst_id])
             # It is possible that _store_model cannot store, and keeps this to
             # True afterwards
             if self._put_count[inst_id] % self.STORE_PERIOD == 0:
@@ -727,7 +728,7 @@ class NILM(object):
         # logging.debug('Stored model for %s' % (inst_id))
 
     def _recompute_model(self, inst_id, start_ts, end_ts, step=6 * 3600,
-                         warmup_period=2*3600):
+                         warmup_period=2*3600, use_notifications=False):
         """
         Recompute a model from data provided by a service. Variations of this
         routine can be created for different data sources.
@@ -750,7 +751,7 @@ class NILM(object):
         How many seconds to operate in non-batch mode with 3-second data frames,
         in order to prepare for the appropriate live operation.
         """
-        # TODO: Take into account naming events in the model
+        # TODO: Use editing events to determine appliance naming
         if self._computations_url is None:
             logging.warning(("No URL has been provided for past data.",
                              "Model re-computation is not supported."))
@@ -784,7 +785,7 @@ class NILM(object):
             self._put_count[inst_id] = 0
             model = self._models[inst_id]
             url = self._computations_url + '/' + inst_id
-
+        time.sleep(0.1)
         # Main recomputation loop.
         logging.info('Starting recomputation loop')
         rstep = step
@@ -821,7 +822,10 @@ class NILM(object):
                 if self._store_flag:
                     # Persistent storage
                     self._store_model(inst_id)
+            time.sleep(0.1)
 
+        logging.debug(
+            "Finished first stage of recomputation for %s" % (inst_id))
         st = (end_ts - warmup_period + 1) * 1000
         et = end_ts * 1000
         params = {
@@ -829,12 +833,14 @@ class NILM(object):
             "end": et
         }
         self._orch_token = utils.get_jwt('nilm', self._orch_jwt_psk)
-        r = utils.request_with_retry(url, params, request='get',
+        r = utils.request_with_retry(url, data=json.dumps(params),
+                                     request='get',
                                      token=self._orch_token)
         if not r.ok:
             data = None
         else:
             data = utils.get_data_from_cenote_response(r)
+        if data is not None:
             rstep = 3  # Hardcoded
             for i in range(0, data.shape[0], rstep):
                 d = data.iloc[i:i+rstep, :]
@@ -847,26 +853,34 @@ class NILM(object):
                     if self._store_flag:
                         # Persistent storage
                         self._store_model(inst_id)
-        # Name the appliances based on past user resposes
-        url = self._notifications_url + '/' + inst_id + '/' + \
-            self._notifications_batch_suffix
-        self._orch_token = utils.get_jwt('nilm', self._orch_jwt_psk)
-        r = utils.request_with_retry(url, token=self._orch_token)
-        if not r.ok:
-            logging.error(
-                "Error in receiving data for %s failed: (%d, %s)"
-                % (inst_id, r.status_code, r.text)
-            )
-        else:
-            # Everything went well, process the past notification responses
-            # TODO: Should we update this to be based on matched signatures? We
-            # transition from notification-based model to editing
-            logging.info("Notifications for %s received successfully,"
-                         "processing.", inst_id)
-            with self._model_lock[inst_id]:
-                self._recomputation_appliance_naming(inst_id, r.text)
+                time.sleep(0.01)
+        if use_notifications:
+            # Name the appliances based on past user resposes
+            url = self._notifications_url + inst_id + '/' + \
+                self._notifications_batch_suffix
+            self._orch_token = utils.get_jwt('nilm', self._orch_jwt_psk)
+            r = utils.request_with_retry(url,
+                                         request='get',
+                                         token=self._orch_token)
+            if not r.ok:
+                logging.warning(
+                    "Error in receiving data for %s failed: (%d, %s)"
+                    % (inst_id, r.status_code, r.text)
+                )
+            else:
+                # Everything went well, process the past notification responses
+                # TODO: Should we update this to be based on matched signatures? We
+                # transition from notification-based model to editing
+                logging.info("Notifications for %s received successfully,"
+                             "processing.", inst_id)
+                with self._model_lock[inst_id]:
+                    self._recomputation_appliance_naming(inst_id, r.text)
         with self._model_lock[inst_id]:
+            logging.debug("Finishing recomputation for %s" % (inst_id))
+            self._models[inst_id]._reset()
             self._recomputation_active[inst_id] = False
+        time.sleep(0.1)
+        logging.debug("Finished recomputation for %s" % (inst_id))
 
     def _recomputation_appliance_naming(self, inst_id, naming):
         """
@@ -903,21 +917,24 @@ class NILM(object):
         min_diff = pd.Timedelta(value=5, units='seconds')
         appliance = None
         for n in notif:
-            ts = pd.to_datetime(n['created_at'], unit='ms')
-            for a in model.appliances:
+            if type(n) is not dict:
+                continue
+            ts = pd.to_datetime(n['createdat'], unit='ms')
+            for _, a in model.appliances.items():
                 idx = a.activations['start'].sub(ts).abs().idxmin()
-                nearest = a.at[idx, 'start']
+                nearest = a.activations.at[idx, 'start']
                 if ts - nearest < min_diff:
                     appliance = a
-        if appliance is not None:
-            appliance.category = notif['selecteddevice']
-            # TODO: Naming should be provided externally
-            # Handle multiple appliances of same type
-            count = 0
-            for a in model.appliances:
-                if a.category == appliance.category:
-                    count += 1
-            appliance.name = '%s %d' % (notif['selecteddevice'], count)
+                    break
+            if appliance is not None:
+                appliance.category = notif['selecteddevice']
+                # TODO: Naming should be provided externally
+                # Handle multiple appliances of same type
+                count = 0
+                for _, a in model.appliances.items():
+                    if a.category == appliance.category:
+                        count += 1
+                appliance.name = '%s %d' % (notif['selecteddevice'], count)
 
     def on_get(self, req, resp, inst_id):
         """
@@ -1105,9 +1122,11 @@ class NILM(object):
         end_ts = int(req.params['end'])
         step = int(req.params['step'])
         name = "recomputation_%s" % (inst_id)
+        warmup = 0
         self._recomputation_thread = threading.Thread(
             target=self._recompute_model, name=name,
-            args=(inst_id, start_ts, end_ts, step)
+            args=(inst_id, start_ts, end_ts, step),
+            kwargs={'warmup_period': warmup}
         )
         self._recomputation_thread.start()
         now = datetime.datetime.now()
