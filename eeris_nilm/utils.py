@@ -131,7 +131,7 @@ def preprocess_data(data, subset=['active', 'reactive']):
     # Make sure timestamps are in correct order
     out = data.sort_index()
     # Make sure there are no NAs
-    out = out.dropna()
+    out = out.dropna(subset=subset)
     # Round timestamps to 1s
     out.index = out.index.round('1s')
     out = out.reset_index()
