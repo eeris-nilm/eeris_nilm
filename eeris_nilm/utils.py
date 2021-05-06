@@ -110,7 +110,7 @@ def get_normalized_data(data, nominal_voltage):
     return r_data
 
 
-def preprocess_data(data):
+def preprocess_data(data, subset=['active', 'reactive']):
     """
     Drop duplicates and resample all data to 1 second sampling frequency.
 
@@ -118,6 +118,10 @@ def preprocess_data(data):
     ----------
     data : pandas.DataFrame
     Pandas dataframe with the original data.
+
+    subset : list
+    Subset of columns to consider for preprocessing and removal of NAs (see
+    also pandas.DataFrame.dropna())
 
     Returns
     -------
