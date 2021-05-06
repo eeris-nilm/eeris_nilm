@@ -812,6 +812,10 @@ class LiveHart(object):
         self._ymatch['active'][-start:-end] += active
         # Hardcoded parameters. Can be more strict.
         check_threshold = max([0.2 * active, 100.0])
+        if start > self._buffer.shape[0]:
+            start = self._buffer.shape[0] - 1
+            if end > start:
+                return False
         diff = self._ymatch[-start:-end]['active'].values - \
             self._buffer[-start:-end]['active'].values
         check = np.sum(diff > check_threshold)
